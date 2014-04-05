@@ -23,6 +23,7 @@
 #include <linux/pci.h>
 #include <linux/miscdevice.h>
 #include <linux/kref.h>
+#include <linux/blk-mq.h>
 
 struct nvme_bar {
 	__u64			cap;	/* Controller Capabilities */
@@ -75,6 +76,9 @@ extern unsigned char io_timeout;
 struct nvme_dev {
 	struct list_head node;
 	struct nvme_queue **queues;
+	struct request_queue *admin_q;
+	struct blk_mq_tag_set admin_tags;
+	struct blk_mq_tag_set tags;
 	u32 __iomem *dbs;
 	struct pci_dev *pci_dev;
 	struct dma_pool *prp_page_pool;
@@ -155,8 +159,10 @@ void nvme_unmap_user_pages(struct nvme_dev *dev, int write,
 			struct nvme_iod *iod);
 struct nvme_queue *get_nvmeq(struct nvme_dev *dev);
 void put_nvmeq(struct nvme_queue *nvmeq);
-int nvme_submit_sync_cmd(struct nvme_queue *nvmeq, struct nvme_command *cmd,
-						u32 *result, unsigned timeout);
+int nvme_submit_sync_user_cmd(struct nvme_ns *ns, struct nvme_command *cmd,
+						u32 *result);
+int nvme_submit_sync_admin_cmd(struct nvme_dev *dev, struct nvme_command *cmd,
+						u32 *result);
 int nvme_submit_flush_data(struct nvme_queue *nvmeq, struct nvme_ns *ns);
 int nvme_submit_admin_cmd(struct nvme_dev *, struct nvme_command *,
 							u32 *result);

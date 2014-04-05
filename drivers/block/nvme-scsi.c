@@ -22,7 +22,6 @@
  */
 
 #include <linux/nvme.h>
-#include <linux/bio.h>
 #include <linux/bitops.h>
 #include <linux/blkdev.h>
 #include <linux/compat.h>
@@ -1020,7 +1019,7 @@ static int nvme_trans_log_info_exceptions(struct nvme_ns *ns,
 	c.common.prp1 = cpu_to_le64(dma_addr);
 	c.common.cdw10[0] = cpu_to_le32(((sizeof(struct nvme_smart_log) /
 			BYTES_TO_DWORDS) << 16) | NVME_GET_SMART_LOG_PAGE);
-	res = nvme_submit_admin_cmd(dev, &c, NULL);
+	res = nvme_submit_sync_admin_cmd(dev, &c, NULL);
 	if (res != NVME_SC_SUCCESS) {
 		temp_c = LOG_TEMP_UNKNOWN;
 	} else {
@@ -1088,7 +1087,7 @@ static int nvme_trans_log_temperature(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 	c.common.prp1 = cpu_to_le64(dma_addr);
 	c.common.cdw10[0] = cpu_to_le32(((sizeof(struct nvme_smart_log) /
 			BYTES_TO_DWORDS) << 16) | NVME_GET_SMART_LOG_PAGE);
-	res = nvme_submit_admin_cmd(dev, &c, NULL);
+	res = nvme_submit_sync_admin_cmd(dev, &c, NULL);
 	if (res != NVME_SC_SUCCESS) {
 		temp_c_cur = LOG_TEMP_UNKNOWN;
 	} else {
@@ -1576,7 +1575,7 @@ static int nvme_trans_send_fw_cmd(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 		c.common.cdw10[0] = cpu_to_le32(cdw10);
 	}
 
-	nvme_sc = nvme_submit_admin_cmd(dev, &c, NULL);
+	nvme_sc = nvme_submit_sync_admin_cmd(dev, &c, NULL);
 	res = nvme_trans_status_code(hdr, nvme_sc);
 	if (res)
 		goto out_unmap;
@@ -1938,7 +1937,7 @@ static int nvme_trans_fmt_send_cmd(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 	c.format.nsid = cpu_to_le32(ns->ns_id);
 	c.format.cdw10 = cpu_to_le32(cdw10);
 
-	nvme_sc = nvme_submit_admin_cmd(dev, &c, NULL);
+	nvme_sc = nvme_submit_sync_admin_cmd(dev, &c, NULL);
 	res = nvme_trans_status_code(hdr, nvme_sc);
 	if (res)
 		goto out_dma;
@@ -2033,7 +2032,6 @@ static int nvme_trans_do_nvme_io(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 	int res = SNTI_TRANSLATION_SUCCESS;
 	int nvme_sc;
 	struct nvme_dev *dev = ns->dev;
-	struct nvme_queue *nvmeq;
 	u32 num_cmds;
 	struct nvme_iod *iod;
 	u64 unit_len;
@@ -2106,18 +2104,7 @@ static int nvme_trans_do_nvme_io(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 
 		nvme_offset += unit_num_blocks;
 
-		nvmeq = get_nvmeq(dev);
-		/*
-		 * Since nvme_submit_sync_cmd sleeps, we can't keep
-		 * preemption disabled.  We may be preempted at any
-		 * point, and be rescheduled to a different CPU.  That
-		 * will cause cacheline bouncing, but no additional
-		 * races since q_lock already protects against other
-		 * CPUs.
-		 */
-		put_nvmeq(nvmeq);
-		nvme_sc = nvme_submit_sync_cmd(nvmeq, &c, NULL,
-						NVME_IO_TIMEOUT);
+		nvme_sc = nvme_submit_sync_user_cmd(ns, &c, NULL);
 		if (nvme_sc != NVME_SC_SUCCESS) {
 			nvme_unmap_user_pages(dev,
 				(is_write) ? DMA_TO_DEVICE : DMA_FROM_DEVICE,
@@ -2644,7 +2631,6 @@ static int nvme_trans_start_stop(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 {
 	int res = SNTI_TRANSLATION_SUCCESS;
 	int nvme_sc;
-	struct nvme_queue *nvmeq;
 	struct nvme_command c;
 	u8 immed, pcmod, pc, no_flush, start;
 
@@ -2671,9 +2657,7 @@ static int nvme_trans_start_stop(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 			c.common.opcode = nvme_cmd_flush;
 			c.common.nsid = cpu_to_le32(ns->ns_id);
 
-			nvmeq = get_nvmeq(ns->dev);
-			put_nvmeq(nvmeq);
-			nvme_sc = nvme_submit_sync_cmd(nvmeq, &c, NULL, NVME_IO_TIMEOUT);
+			nvme_sc = nvme_submit_sync_user_cmd(ns, &c, NULL);
 
 			res = nvme_trans_status_code(hdr, nvme_sc);
 			if (res)
@@ -2697,15 +2681,12 @@ static int nvme_trans_synchronize_cache(struct nvme_ns *ns,
 	int res = SNTI_TRANSLATION_SUCCESS;
 	int nvme_sc;
 	struct nvme_command c;
-	struct nvme_queue *nvmeq;
 
 	memset(&c, 0, sizeof(c));
 	c.common.opcode = nvme_cmd_flush;
 	c.common.nsid = cpu_to_le32(ns->ns_id);
 
-	nvmeq = get_nvmeq(ns->dev);
-	put_nvmeq(nvmeq);
-	nvme_sc = nvme_submit_sync_cmd(nvmeq, &c, NULL, NVME_IO_TIMEOUT);
+	nvme_sc = nvme_submit_sync_user_cmd(ns, &c, NULL);
 
 	res = nvme_trans_status_code(hdr, nvme_sc);
 	if (res)
@@ -2872,7 +2853,6 @@ static int nvme_trans_unmap(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 	struct nvme_dev *dev = ns->dev;
 	struct scsi_unmap_parm_list *plist;
 	struct nvme_dsm_range *range;
-	struct nvme_queue *nvmeq;
 	struct nvme_command c;
 	int i, nvme_sc, res = -ENOMEM;
 	u16 ndesc, list_len;
@@ -2914,10 +2894,7 @@ static int nvme_trans_unmap(struct nvme_ns *ns, struct sg_io_hdr *hdr,
 	c.dsm.nr = cpu_to_le32(ndesc - 1);
 	c.dsm.attributes = cpu_to_le32(NVME_DSMGMT_AD);
 
-	nvmeq = get_nvmeq(dev);
-	put_nvmeq(nvmeq);
-
-	nvme_sc = nvme_submit_sync_cmd(nvmeq, &c, NULL, NVME_IO_TIMEOUT);
+	nvme_sc = nvme_submit_sync_user_cmd(ns, &c, NULL);
 	res = nvme_trans_status_code(hdr, nvme_sc);
 
 	dma_free_coherent(&dev->pci_dev->dev, ndesc * sizeof(*range),
