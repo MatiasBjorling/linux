@@ -336,7 +336,6 @@ nvme_alloc_iod(unsigned nseg, unsigned nbytes, gfp_t gfp)
 		iod->npages = -1;
 		iod->length = nbytes;
 		iod->nents = 0;
-		iod->start_time = jiffies;
 	}
 
 	return iod;
