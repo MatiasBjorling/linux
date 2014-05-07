@@ -1033,7 +1033,6 @@ static enum blk_eh_timer_return nvme_timeout(struct request *rq)
 	dev_warn(nvmeq->q_dmadev, "Request %p timed out, q %d cmdid %d %u %u\n",
 						rq, nvmeq->qid, rq->tag, rq->__data_len, blk_rq_bytes(rq));
 
-	return BLK_EH_RESET_TIMER;
 	if (nvmeq->dev->initialized)
 		nvme_abort_rq(rq);
 
