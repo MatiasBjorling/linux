@@ -466,6 +466,7 @@ int nvme_setup_prps(struct nvme_dev *dev, struct nvme_common_command *cmd,
 static int nvme_map_rq(struct nvme_queue *nvmeq, struct nvme_iod *iod,
 		struct request *rq, enum dma_data_direction dma_dir, int psegs)
 {
+	sg_init_table(iod->sg, psegs);
 	iod->nents = blk_rq_map_sg(rq->q, rq, iod->sg);
 
 	if (dma_map_sg(nvmeq->q_dmadev, iod->sg, iod->nents, dma_dir) == 0)
