@@ -1329,7 +1329,6 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 		dev->admin_tags.queue_depth = 64,
 		dev->admin_tags.timeout = ADMIN_TIMEOUT,
 		dev->admin_tags.numa_node= NUMA_NO_NODE,
-		dev->admin_tags.reserved_tags = 8,
 		dev->admin_tags.cmd_size = sizeof(struct nvme_cmd_info),
 		dev->admin_tags.driver_data = dev;
 
