@@ -215,7 +215,12 @@ static void special_completion(struct nvme_dev *dev, void *ctx,
 	if (ctx == CMD_CTX_CANCELLED)
 		return;
 	if (ctx == CMD_CTX_FLUSH)
+	{
+		struct nvme_iod *iod = ctx;
+		struct request *rq = iod->private;
+		blk_put_request(rq);
 		return;
+	}
 	if (ctx == CMD_CTX_ABORT) {
 		++dev->abort_limit;
 		return;
@@ -535,12 +540,9 @@ int nvme_submit_flush_data(struct nvme_queue *nvmeq, struct nvme_ns *ns)
 	struct nvme_cmd_info *cmd = blk_mq_rq_to_pdu(rq);
 	int result;
 
-	BUG(); /* Move blk_put_request into special_completion */
-
 	configure_cmd(cmd, (void *)CMD_CTX_FLUSH, special_completion);
 	result = nvme_submit_flush(nvmeq, ns, rq->tag);
-	/* TODO: racy */
-	blk_put_request(rq);
+
 	return result;
 }
 
