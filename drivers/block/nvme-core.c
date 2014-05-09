@@ -1031,7 +1031,6 @@ static enum blk_eh_timer_return nvme_timeout(struct request *rq)
 	};
 	nvme_completion_fn fn;
 
-	/* TODO: returning anything but this crashes the kernel, figure out */
 	dev_warn(nvmeq->q_dmadev, "Request %p timed out, q %d cmdid %d %u %u\n",
 						rq, nvmeq->qid, rq->tag, rq->__data_len, blk_rq_bytes(rq));
 
