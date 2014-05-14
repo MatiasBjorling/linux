@@ -150,9 +150,9 @@ static int nvme_init_hctx(struct blk_mq_hw_ctx *hctx, void *data,
 			  unsigned int i)
 {
 	struct nvme_dev *dev = data;
-	struct nvme_queue *nvmeq = dev->queues[i + 1];
+	struct nvme_queue *nvmeq = dev->queues[(i % dev->queue_count) + 1];
 	if (!nvmeq)
-		return -EINVAL;
+		BUG();
 	nvmeq->hctx = hctx;
 	hctx->driver_data = nvmeq;
 	return 0;
@@ -163,9 +163,10 @@ static int nvme_init_admin_hctx(struct blk_mq_hw_ctx *hctx, void *data,
 {
 	struct nvme_dev *dev = data;
 	struct nvme_queue *nvmeq = dev->queues[0];
-	if (!nvmeq)
-		return -EINVAL;
+
+	BUG_ON(!nvmeq);
 	WARN_ON(nvmeq->hctx);
+
 	nvmeq->hctx = hctx;
 	hctx->driver_data = nvmeq;
 	return 0;
@@ -1744,21 +1745,9 @@ static struct nvme_ns *nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid,
 	if (!ns)
 		return NULL;
 
-	dev->tags.ops = &nvme_mq_ops;
-	dev->tags.nr_hw_queues = dev->queue_count - 1;
-	dev->tags.timeout = NVME_IO_TIMEOUT;
-	dev->tags.numa_node = NUMA_NO_NODE;
-	dev->tags.reserved_tags = 8;
-	dev->tags.cmd_size = sizeof(struct nvme_cmd_info);
-	dev->tags.flags = BLK_MQ_F_SHOULD_MERGE;
-	dev->tags.driver_data = dev;
-
-	if (blk_mq_alloc_tag_set(&dev->tags))
-		goto out_free_ns;
-
 	ns->queue = blk_mq_init_queue(&dev->tags);
 	if (!ns->queue)
-		goto out_free_tag_set;
+		goto out_free_ns;
 	queue_flag_set_unlocked(QUEUE_FLAG_DEFAULT, ns->queue);
 	queue_flag_set_unlocked(QUEUE_FLAG_NOMERGES, ns->queue);
 	queue_flag_set_unlocked(QUEUE_FLAG_NONROT, ns->queue);
@@ -1794,8 +1783,6 @@ static struct nvme_ns *nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid,
 
  out_free_queue:
 	blk_cleanup_queue(ns->queue);
- out_free_tag_set:
-	blk_mq_free_tag_set(&dev->tags);
  out_free_ns:
 	kfree(ns);
 	return NULL;
@@ -1972,6 +1959,18 @@ static int nvme_dev_add(struct nvme_dev *dev)
 	if ((pdev->vendor == PCI_VENDOR_ID_INTEL) &&
 			(pdev->device == 0x0953) && ctrl->vs[3])
 		dev->stripe_size = 1 << (ctrl->vs[3] + shift);
+
+	dev->tags.ops = &nvme_mq_ops;
+	dev->tags.nr_hw_queues = dev->queue_count - 1;
+	dev->tags.timeout = NVME_IO_TIMEOUT;
+	dev->tags.numa_node = NUMA_NO_NODE;
+	dev->tags.reserved_tags = 0;
+	dev->tags.cmd_size = sizeof(struct nvme_cmd_info);
+	dev->tags.flags = BLK_MQ_F_SHOULD_MERGE;
+	dev->tags.driver_data = dev;
+
+	if (blk_mq_alloc_tag_set(&dev->tags))
+		goto out;
 
 	id_ns = mem;
 	for (i = 1; i <= nn; i++) {
