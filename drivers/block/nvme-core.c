@@ -568,14 +568,15 @@ static int nvme_submit_rq_queue(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 			return result;
 	}
 
-	result = -ENOMEM;
 	iod = nvme_alloc_iod(psegs, blk_rq_bytes(rq), GFP_ATOMIC);
 	if (!iod)
-		goto nomem;
+		return BLK_MQ_RQ_QUEUE_BUSY;
+
 	iod->private = rq;
 
 	configure_cmd(cmd, iod, rq_completion);
 
+	result = -ENOMEM;
 	if (rq->cmd_flags & REQ_DISCARD) {
 		result = nvme_submit_discard(nvmeq, ns, rq, iod);
 		if (result)
