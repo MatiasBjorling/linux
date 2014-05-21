@@ -682,10 +682,7 @@ static int nvme_queue_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 {
 	struct nvme_ns *ns = hctx->queue->queuedata;
 	struct nvme_queue *nvmeq = hctx->driver_data;
-	int result = -EBUSY;
-
-	/* TODO: soon to be available natively in blk-mq */
-	get_cpu();
+	int result = BLK_MQ_RQ_QUEUE_ERROR;
 
 	spin_lock_irq(&nvmeq->q_lock);
 	if (!nvmeq->q_suspended)
@@ -694,7 +691,6 @@ static int nvme_queue_request(struct blk_mq_hw_ctx *hctx, struct request *rq)
 	nvme_process_cq(nvmeq);
 	spin_unlock_irq(&nvmeq->q_lock);
 
-	put_cpu();
 	return result;
 }
 
