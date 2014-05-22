@@ -312,8 +312,7 @@ static void *nvme_finish_cmd(struct nvme_queue *nvmeq, int tag,
 	return ctx;
 }
 
-/* TODO: rename */
-static void *cancel_cmdinfo(struct nvme_cmd_cb *cmd, nvme_completion_fn *fn)
+static void *cancel_cmd_cb(struct nvme_cmd_cb *cmd, nvme_completion_fn *fn)
 {
 	void *ctx;
 	if (fn)
@@ -765,7 +764,7 @@ static irqreturn_t nvme_irq_check(int irq, void *data)
 static void nvme_abort_command(struct nvme_queue *nvmeq, int cmdid)
 {
 	//spin_lock_irq(&nvmeq->q_lock);
-	//cancel_cmdid(nvmeq, cmdid, NULL);
+	//cancel_cmd_cb(nvmeq, cmdid, NULL);
 	//spin_unlock_irq(&nvmeq->q_lock);
 }
 
@@ -1082,7 +1081,7 @@ static void nvme_cancel_queue_ios(void *data, unsigned long *tag_map)
 
 		dev_warn(nvmeq->q_dmadev, "Cancelling I/O %d QID %d\n",
 							req->tag, nvmeq->qid);
-		ctx = cancel_cmdinfo(cmd, &fn);
+		ctx = cancel_cmd_cb(cmd, &fn);
 		fn(nvmeq, ctx, &cqe);
 
 	} while (1);
@@ -1117,7 +1116,7 @@ static enum blk_eh_timer_return nvme_timeout(struct request *req)
 	if (nvmeq->dev->initialized)
 		nvme_abort_req(req);
 
-	ctx = cancel_cmdinfo(cmd, &fn);
+	ctx = cancel_cmd_cb(cmd, &fn);
 	fn(nvmeq, ctx, &cqe);
 
 	return BLK_EH_HANDLED;
