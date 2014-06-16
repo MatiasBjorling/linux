@@ -228,9 +228,9 @@ struct skd_request_context {
 	struct fit_comp_error_info err_info;
 
 };
-#define SKD_DATA_DIR_HOST_TO_CARD       1
-#define SKD_DATA_DIR_CARD_TO_HOST       2
-#define SKD_DATA_DIR_NONE		3	/* especially for DISCARD requests. */
+#define SKD_DATA_DIR_HOST_TO_CARD	1
+#define SKD_DATA_DIR_CARD_TO_HOST	2
+#define SKD_DATA_DIR_NONE		3 /* especially for DISCARD requests. */
 
 struct skd_special_context {
 	struct skd_request_context req;
@@ -260,11 +260,11 @@ struct skd_sg_io {
 	struct skd_special_context *skspcl;
 };
 
-typedef enum skd_irq_type {
+enum skd_irq_type {
 	SKD_IRQ_LEGACY,
 	SKD_IRQ_MSI,
 	SKD_IRQ_MSIX
-} skd_irq_type_t;
+};
 
 #define SKD_MAX_BARS                    2
 
@@ -273,7 +273,7 @@ struct skd_device {
 	resource_size_t mem_phys[SKD_MAX_BARS];
 	u32 mem_size[SKD_MAX_BARS];
 
-	skd_irq_type_t irq_type;
+	enum skd_irq_type irq_type;
 	u32 msix_count;
 	struct skd_msix_entry *msix_entries;
 
@@ -409,16 +409,15 @@ static inline void skd_reg_write64(struct skd_device *skdev, u64 val,
 static int skd_isr_type = SKD_IRQ_DEFAULT;
 
 module_param(skd_isr_type, int, 0444);
-MODULE_PARM_DESC(skd_isr_type, "Interrupt type capability."
-		 " (0==legacy, 1==MSI, 2==MSI-X, default==1)");
+MODULE_PARM_DESC(skd_isr_type,
+	"Interrupt type capability. (0==legacy, 1==MSI, 2==MSI-X, default==1)");
 
 #define SKD_MAX_REQ_PER_MSG_DEFAULT 1
 static int skd_max_req_per_msg = SKD_MAX_REQ_PER_MSG_DEFAULT;
 
 module_param(skd_max_req_per_msg, int, 0444);
 MODULE_PARM_DESC(skd_max_req_per_msg,
-		 "Maximum SCSI requests packed in a single message."
-		 " (1-14, default==1)");
+	"Maximum SCSI requests packed in a single message. (1-14, default==1)");
 
 #define SKD_MAX_QUEUE_DEPTH_DEFAULT 64
 #define SKD_MAX_QUEUE_DEPTH_DEFAULT_STR "64"
@@ -426,19 +425,18 @@ static int skd_max_queue_depth = SKD_MAX_QUEUE_DEPTH_DEFAULT;
 
 module_param(skd_max_queue_depth, int, 0444);
 MODULE_PARM_DESC(skd_max_queue_depth,
-		 "Maximum SCSI requests issued to s1120."
-		 " (1-200, default==" SKD_MAX_QUEUE_DEPTH_DEFAULT_STR ")");
+	 "Maximum SCSI requests issued to s1120. (1-200, default==" \
+					SKD_MAX_QUEUE_DEPTH_DEFAULT_STR ")");
 
 static int skd_sgs_per_request = SKD_N_SG_PER_REQ_DEFAULT;
 module_param(skd_sgs_per_request, int, 0444);
 MODULE_PARM_DESC(skd_sgs_per_request,
-		 "Maximum SG elements per block request."
-		 " (1-4096, default==256)");
+	"Maximum SG elements per block request. (1-4096, default==256)");
 
 static int skd_max_pass_thru = SKD_N_SPECIAL_CONTEXT;
 module_param(skd_max_pass_thru, int, 0444);
 MODULE_PARM_DESC(skd_max_pass_thru,
-		 "Maximum SCSI pass-thru at a time." " (1-50, default==32)");
+	"Maximum SCSI pass-thru at a time." " (1-50, default==32)");
 
 module_param(skd_dbg_level, int, 0444);
 MODULE_PARM_DESC(skd_dbg_level, "s1120 debug level (0,1,2)");
@@ -3998,8 +3996,7 @@ static int skd_acquire_msix(struct skd_device *skdev)
 	return 0;
 
 msix_out:
-	if (entries)
-		kfree(entries);
+	kfree(entries);
 	skd_release_msix(skdev);
 	return rc;
 }
@@ -4992,8 +4989,6 @@ static void skd_pci_remove(struct pci_dev *pdev)
 	pci_release_regions(pdev);
 	pci_disable_device(pdev);
 	pci_set_drvdata(pdev, NULL);
-
-	return;
 }
 
 static int skd_pci_suspend(struct pci_dev *pdev, pm_message_t state)
@@ -5332,8 +5327,7 @@ static void skd_log_skreq(struct skd_device *skdev,
 		u32 lba = (u32)blk_rq_pos(req);
 		u32 count = blk_rq_sectors(req);
 
-		pr_debug("%s:%s:%d "
-			 "req=%p lba=%u(0x%x) count=%u(0x%x) dir=%d\n",
+		pr_debug("%s:%s:%d req=%p lba=%u(0x%x) count=%u(0x%x) dir=%d\n",
 			 skdev->name, __func__, __LINE__,
 			 req, lba, lba, count, count,
 			 (int)rq_data_dir(req));
