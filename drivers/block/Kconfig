@@ -347,6 +347,18 @@ config BLK_DEV_OSD
 
 	  If unsure, say N.
 
+config BLK_DEV_KVBLADE
+	tristate "ATA over Ethernet (kvblade) support"
+	depends on NET
+	---help---
+	  Saying Y or M here will allow to expose block devices over
+	  the ATA over Ethernet protocol.
+
+	  To compile this driver as a module, choose M here: the
+	  module will be called kvblade.
+
+	  If unsure, say N.
+
 config BLK_DEV_SX8
 	tristate "Promise SATA SX8 support"
 	depends on PCI
