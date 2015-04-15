@@ -1,81 +1,77 @@
-# LightNVM: A host-side driver for Open-Channel Solid State Drives
+# LightNVM - Linux kernel support for Open-channel SSDs
 
-Open-channel SSDs are devices which exposes direct access to its physical
-flash storage, while keeping a subset of the internal features of SSDs.
+Open-channel SSDs are devices that share responsibilities with the host
+in order to implement and maintain features that typical SSDs keep
+strictly in firmware. These include (i) the Flash Translation Layer
+(FTL), (ii) bad block management, and (iii) hardware units such as the
+flash controller, the interface controller, and large amounts of flash
+chips. In this way, Open-channels SSDs can expose direct
+access to their physical flash storage, while keeping a subset of the
+internal features of SSDs.
 
-A common SSD consists of a flash translation layer (FTL), bad block
-management, and hardware units such as flash and host
-interface controllers and couple it with a large amount of flash chips.
+LightNVM is a specification that gives support to Open-channel SSDs.
+LightNVM allows the host to manage data placement, garbage collection,
+and parallelism. Device specific responsibilities such as bad block
+management, FTL extensions to support atomic IOs, or metadata
+persistence are still handled by the device.
 
-Open-Channel SSDs moves part of the FTL responsibility into the host, allowing
-the host to manage data placement, garbage collection and parallelism. The
-device continues to maintain information such as bad block management, implements
-a simpler FTL, which allows extensions such as atomic IOs, metadata
-persistence and similar to be implemented.
+The architecture of LightNVM consists of two parts: core and (multiple)
+targets. The core implements functionality shared across targets. This
+is initialization, teardown and statistics. The targets implement the
+interface that exposes physical flash to user-space applications.
+Examples of such targets include key-value store, object-store, as well
+as traditional block devices, which can be application-specific.
 
-The architecture of LightNVM consists of a core and multiple targets. The core
-implements functionality shared across targets, such as initialization, teardown
-and statistics. The targets are how physical flash are
-exposed to user-space. This can be as a block device, key-value store,
-object-store, etc.
+Currently, LightNVM is hooked up through the null_blk and NVMe driver.
+The NVMe extension allow development using the LightNVM-extended QEMU
+implementation, using Keith Busch's qemu-nvme branch.
 
-LightNVM is currently hooked up through the null_blk and NVMe driver. The NVMe
-extension allow development using the LightNVM-extended QEMU implementation,
-using Keith Busch's qemu-nvme branch.
+Development is taking place at:
+https://github.com/OpenChannelSSD/
 
 # How to use
 -------------
+To use LightNVM, a device is required to register as an open-channel
+SSD.
 
-To use LightNVM, a device is required to register as an open-channel SSD.
+There exist two implementations at the moment: null_blk and NVMe driver.
+The null_blk driver is intended for performance testing. The NVMe driver
+can be initialized using the patches of Keith Busch's QEMU NVMe
+simulator, as well as using an Open-channel SSD device.
 
-Currently, two implementations exist. The null_blk and NVMe driver. The
-null_blk driver is for performance testing, while the NVMe driver can be
-initialized using a patches version of Keith Busch's QEMU NVMe simulator, or if
-real hardware is available.
-
-The QEMU branch is available at: https://github.com/OpenChannelSSD/qemu-nvme
+The QEMU branch is available at:
+https://github.com/OpenChannelSSD/qemu-nvme
 
 Follow the guide at: https://github.com/OpenChannelSSD/linux/wiki
 
-# Available Hardware
-
-A couple of open platforms are currently being ported to utilize LightNVM:
-
- IIT Madras (https://bitbucket.org/casl/ssd-controller)
-   An open-source implementation of a NVMe controller in BlueSpec. Can run on
-   Xilix FPGA's, such as Artix 7, Kintex 7 and Vertex 7.
-
- MemBlaze eBlaze (https://github.com/OpenChannelSSD/memblaze-eblaze)
-   A high-performance SSD that exposes direct flash to the host. The device driver is in progress. 
-
- OpenSSD Jasmine (http://www.openssd-project.org/)
-   An open-firmware SSD, that allows the user to implement its own FTL within
-   the controller.
-
-   An experimental patch of the firmware is found in the lightnvm branch:
-     https://github.com/ClydeProjects/OpenSSD/
-
-   Todo: Requires bad block management to be useful and storing of host FTL
-   metadata.
-
- OpenSSD Cosmos (http://www.openssd-project.org/wiki/Cosmos_OpenSSD_Platform)
-   A complete development board with FPGA, ARM Cortex A9 and FPGA-accelerated
-   host access.
-
 # LightNVM Specification
 
-We are currently creating a specification as more and more of the
-host/device interface is stabilized. Please see this Google document. It's open
-for comments.
+We are actively creating a specification as more and more of the
+host/device interface is stabilized. Please see this Google document.
+It's open for comments.
 
-  http://goo.gl/BYTjLI
+http://goo.gl/BYTjLI
 
-In the making
--------------
+# Available Hardware
 
- * Bad block management. This is kept device side, however the host still
-   requires bad block information to prevent writing to dead flash blocks.
- * Space-efficient algorithms for translation tables.
+A number of open platforms are being ported to utilize LightNVM:
 
+- IIT Madras (https://bitbucket.org/casl/ssd-controller) An open-source
+implementation of a NVMe controller in BlueSpec. Can run on Xilix
+FPGA's such as Artix 7, Kintex 7, and Vertex 7.
 
+- MemBlaze eBlaze (https://github.com/OpenChannelSSD/memblaze-eblaze) A
+high-performance SSD that exposes direct flash to the host. The device
+driver is in progress.
+
+A number of stealth hardware startups are supporting LightNVM directly
+in their designs. Please contact us for more information.
+
+- Other platform such as OpenSSD Jasmine and OpenSSD Cosmos are able to
+support LightNVM. However, there is no compatible firmwares yet.
+
+# Contact:
+You can contact us at:
+	matias@paletta.io
+	javier@paletta.io
 
