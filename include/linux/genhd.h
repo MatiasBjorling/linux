@@ -199,6 +199,9 @@ struct gendisk {
 #ifdef  CONFIG_BLK_DEV_INTEGRITY
 	struct blk_integrity *integrity;
 #endif
+#ifdef CONFIG_NVM
+	struct nvm_dev *nvm;
+#endif
 	int node_id;
 };
 
