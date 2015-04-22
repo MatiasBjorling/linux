@@ -19,6 +19,7 @@
 #include <linux/pci.h>
 #include <linux/kref.h>
 #include <linux/blk-mq.h>
+#include <linux/lightnvm.h>
 
 struct nvme_bar {
 	__u64			cap;	/* Controller Capabilities */
@@ -39,10 +40,12 @@ struct nvme_bar {
 #define NVME_CAP_STRIDE(cap)	(((cap) >> 32) & 0xf)
 #define NVME_CAP_MPSMIN(cap)	(((cap) >> 48) & 0xf)
 #define NVME_CAP_MPSMAX(cap)	(((cap) >> 52) & 0xf)
+#define NVME_CAP_LIGHTNVM(cap)	(((cap) >> 38) & 0x1)
 
 enum {
 	NVME_CC_ENABLE		= 1 << 0,
 	NVME_CC_CSS_NVM		= 0 << 4,
+	NVME_CC_CSS_LIGHTNVM	= 1 << 4,
 	NVME_CC_MPS_SHIFT	= 7,
 	NVME_CC_ARB_RR		= 0 << 11,
 	NVME_CC_ARB_WRRU	= 1 << 11,
@@ -120,6 +123,7 @@ struct nvme_ns {
 	u16 ms;
 	bool ext;
 	u8 pi_type;
+	int type;
 	u64 mode_select_num_blocks;
 	u32 mode_select_block_len;
 };
@@ -137,6 +141,7 @@ struct nvme_iod {
 	int nents;		/* Used in scatterlist */
 	int length;		/* Of data, in bytes */
 	dma_addr_t first_dma;
+	struct nvm_rq_data nvm_rqdata; /* Physical sectors description of the I/O */
 	struct scatterlist meta_sg[1]; /* metadata requires single contiguous buffer */
 	struct scatterlist sg[0];
 };
@@ -150,7 +155,7 @@ int nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 		void *buf, unsigned bufflen);
 int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 		void *buffer, void __user *ubuffer, unsigned bufflen,
-		u32 *result, unsigned timeout);
+		u32 *result, unsigned timeout, void *special);
 int nvme_identify_ctrl(struct nvme_dev *dev, struct nvme_id_ctrl **id);
 int nvme_identify_ns(struct nvme_dev *dev, unsigned nsid,
 		struct nvme_id_ns **id);
@@ -165,5 +170,9 @@ struct sg_io_hdr;
 int nvme_sg_io(struct nvme_ns *ns, struct sg_io_hdr __user *u_hdr);
 int nvme_sg_io32(struct nvme_ns *ns, unsigned long arg);
 int nvme_sg_get_version_num(int __user *ip);
+
+int nvme_nvm_register(struct request_queue *q, struct gendisk *disk);
+int nvme_nvm_prep_internal_rq(struct request *rq, struct nvme_ns *ns,
+				struct nvme_command *c, struct nvme_iod *iod);
 
 #endif /* _LINUX_NVME_H */
