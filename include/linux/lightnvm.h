@@ -135,6 +135,7 @@ struct nvm_dev_ops {
 	nvm_alloc_ppalist_fn	*alloc_ppalist;
 	nvm_free_ppalist_fn	*free_ppalist;
 
+	int			dev_sector_size;
 	uint8_t			max_phys_sect;
 };
 
@@ -286,10 +287,8 @@ extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
  * bytes chunks. This should be set to the smallest command size available for a
  * given device.
  */
-#define NVM_SECTOR (512)
-#define EXPOSED_PAGE_SIZE (4096)
 
-#define NR_PHY_IN_LOG (EXPOSED_PAGE_SIZE / NVM_SECTOR)
+#define DEV_EXPOSED_PAGE_SIZE (4096)
 
 #define NVM_MSG_PREFIX "nvm"
 #define ADDR_EMPTY (~0ULL)
