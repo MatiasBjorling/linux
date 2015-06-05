@@ -40,6 +40,7 @@
 #include <linux/slab.h>
 #include <linux/t10-pi.h>
 #include <linux/types.h>
+#include <linux/lightnvm.h>
 #include <scsi/sg.h>
 #include <asm-generic/io-64-nonatomic-lo-hi.h>
 
@@ -1751,7 +1752,8 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 
 	dev->page_size = 1 << page_shift;
 
-	dev->ctrl_config = NVME_CC_CSS_NVM;
+	dev->ctrl_config = NVME_CAP_LIGHTNVM(cap) ?
+					NVME_CC_CSS_LIGHTNVM : NVME_CC_CSS_NVM;
 	dev->ctrl_config |= (page_shift - 12) << NVME_CC_MPS_SHIFT;
 	dev->ctrl_config |= NVME_CC_ARB_RR | NVME_CC_SHN_NONE;
 	dev->ctrl_config |= NVME_CC_IOSQES | NVME_CC_IOCQES;
@@ -1997,6 +1999,16 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 		return -ENODEV;
 	}
 
+	if ((dev->ctrl_config & NVME_CC_CSS_LIGHTNVM) &&
+		id->nsfeat & NVME_NS_FEAT_NVM && ns->type != NVME_NS_NVM) {
+		if (nvme_nvm_register(ns->queue, disk)) {
+			dev_warn(dev->dev,
+				    "%s: LightNVM init failure\n", __func__);
+			return -ENODEV;
+		}
+		ns->type = NVME_NS_NVM;
+	}
+
 	old_ms = ns->ms;
 	lbaf = id->flbas & NVME_NS_FLBAS_LBA_MASK;
 	ns->lba_shift = id->lbaf[lbaf].ds;
@@ -2028,7 +2040,7 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 								!ns->ext)
 		nvme_init_integrity(ns);
 
-	if (ns->ms && !blk_get_integrity(disk))
+	if ((ns->ms && !blk_get_integrity(disk)) || ns->type == NVME_NS_NVM)
 		set_capacity(disk, 0);
 	else
 		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
@@ -2146,7 +2158,8 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 	if (nvme_revalidate_disk(ns->disk))
 		goto out_free_disk;
 
-	add_disk(ns->disk);
+	if (ns->type != NVME_NS_NVM)
+		add_disk(ns->disk);
 	if (ns->ms) {
 		struct block_device *bd = bdget_disk(ns->disk, 0);
 		if (!bd)
@@ -2344,6 +2357,9 @@ static int nvme_setup_io_queues(struct nvme_dev *dev)
 static void nvme_free_namespace(struct nvme_ns *ns)
 {
 	list_del(&ns->list);
+
+	if (ns->type == NVME_NS_NVM)
+		nvm_unregister(ns->disk);
 
 	spin_lock(&dev_list_lock);
 	ns->disk->private_data = NULL;
