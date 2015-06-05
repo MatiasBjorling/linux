@@ -19,6 +19,7 @@
 #include <linux/pci.h>
 #include <linux/kref.h>
 #include <linux/blk-mq.h>
+#include <linux/lightnvm.h>
 
 struct nvme_bar {
 	__u64			cap;	/* Controller Capabilities */
@@ -41,6 +42,7 @@ struct nvme_bar {
 #define NVME_CAP_STRIDE(cap)	(((cap) >> 32) & 0xf)
 #define NVME_CAP_MPSMIN(cap)	(((cap) >> 48) & 0xf)
 #define NVME_CAP_MPSMAX(cap)	(((cap) >> 52) & 0xf)
+#define NVME_CAP_LIGHTNVM(cap)	(((cap) >> 38) & 0x1)
 
 #define NVME_CMB_BIR(cmbloc)	((cmbloc) & 0x7)
 #define NVME_CMB_OFST(cmbloc)	(((cmbloc) >> 12) & 0xfffff)
@@ -56,6 +58,7 @@ struct nvme_bar {
 enum {
 	NVME_CC_ENABLE		= 1 << 0,
 	NVME_CC_CSS_NVM		= 0 << 4,
+	NVME_CC_CSS_LIGHTNVM	= 1 << 4,
 	NVME_CC_MPS_SHIFT	= 7,
 	NVME_CC_ARB_RR		= 0 << 11,
 	NVME_CC_ARB_WRRU	= 1 << 11,
@@ -138,6 +141,7 @@ struct nvme_ns {
 	u16 ms;
 	bool ext;
 	u8 pi_type;
+	int type;
 	u64 mode_select_num_blocks;
 	u32 mode_select_block_len;
 };
@@ -184,4 +188,6 @@ int nvme_sg_io(struct nvme_ns *ns, struct sg_io_hdr __user *u_hdr);
 int nvme_sg_io32(struct nvme_ns *ns, unsigned long arg);
 int nvme_sg_get_version_num(int __user *ip);
 
+int nvme_nvm_register(struct request_queue *q, char *disk_name);
+void nvme_nvm_unregister(char *disk_name);
 #endif /* _LINUX_NVME_H */
