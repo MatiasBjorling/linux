@@ -59,6 +59,8 @@ enum {
 	NVME_CSTS_SHST_OCCUR	= 1 << 2,
 	NVME_CSTS_SHST_CMPLT	= 2 << 2,
 	NVME_CSTS_SHST_MASK	= 3 << 2,
+
+	NVME_NS_LIGHTNVM	= 1,
 };
 
 extern unsigned char nvme_io_timeout;
@@ -121,6 +123,7 @@ struct nvme_ns {
 	u16 ms;
 	bool ext;
 	u8 pi_type;
+	int type;
 	u64 mode_select_num_blocks;
 	u32 mode_select_block_len;
 };
@@ -167,4 +170,7 @@ int nvme_sg_io(struct nvme_ns *ns, struct sg_io_hdr __user *u_hdr);
 int nvme_sg_io32(struct nvme_ns *ns, unsigned long arg);
 int nvme_sg_get_version_num(int __user *ip);
 
+int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id);
+int nvme_nvm_register(struct request_queue *q, char *disk_name);
+void nvme_nvm_unregister(char *disk_name);
 #endif /* _LINUX_NVME_H */
