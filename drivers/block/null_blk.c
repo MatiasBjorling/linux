@@ -18,7 +18,7 @@ struct nullb_cmd {
 	struct bio *bio;
 	unsigned int tag;
 	struct nullb_queue *nq;
-	struct nvm_rq_data nvm_rqdata;
+	struct nvm_rq nvmrq;
 };
 
 struct nullb_queue {
@@ -284,7 +284,7 @@ static void null_softirq_done_fn(struct request *rq)
 static inline void null_handle_cmd(struct nullb_cmd *cmd)
 {
 	if (nvm_enable)
-		nvm_unprep_rq(cmd->rq, &cmd->nvm_rqdata);
+		nvm_unprep_rq(cmd->rq, &cmd->nvmrq);
 
 	/* Complete IO by inline, softirq or timer */
 	switch (irqmode) {
@@ -452,8 +452,8 @@ static int null_queue_rq(struct blk_mq_hw_ctx *hctx,
 	cmd->nq = hctx->driver_data;
 
 	if (nvm_enable) {
-		nvm_init_rq_data(&cmd->nvm_rqdata);
-		switch (nvm_prep_rq(cmd->rq, &cmd->nvm_rqdata)) {
+		nvm_init_rq_data(&cmd->nvmrq);
+		switch (nvm_prep_rq(cmd->rq, &cmd->nvmrq)) {
 		case NVM_PREP_DONE:
 			return BLK_MQ_RQ_QUEUE_OK;
 		case NVM_PREP_REQUEUE:
