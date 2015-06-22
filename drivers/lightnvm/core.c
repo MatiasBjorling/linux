@@ -769,7 +769,7 @@ void nvm_unregister(struct gendisk *disk)
 }
 EXPORT_SYMBOL(nvm_unregister);
 
-int nvm_prep_rq(struct request *rq, struct nvm_rq_data *rqdata)
+int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
 	struct nvm_target_instance *ins;
 	struct bio *bio;
@@ -805,7 +805,7 @@ int nvm_prep_rq(struct request *rq, struct nvm_rq_data *rqdata)
 }
 EXPORT_SYMBOL(nvm_prep_rq);
 
-void nvm_unprep_rq(struct request *rq, struct nvm_rq_data *rqdata)
+void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
 	struct nvm_target_instance *ins;
 	struct bio *bio;

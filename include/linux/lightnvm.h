@@ -185,7 +185,7 @@ struct nvm_dev {
 	uint32_t sector_size;
 };
 
-struct nvm_rq_data {
+struct nvm_rq {
 		sector_t phys_sector;
 };
 
@@ -213,8 +213,8 @@ struct nvm_per_rq {
 };
 
 typedef void (nvm_tgt_make_rq)(struct request_queue *, struct bio *);
-typedef int (nvm_tgt_prep_rq)(struct request *, struct nvm_rq_data *, void *);
-typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq_data *,
+typedef int (nvm_tgt_prep_rq)(struct request *, struct nvm_rq *, void *);
+typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq *,
 									void *);
 typedef sector_t (nvm_tgt_capacity)(void *);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
@@ -249,8 +249,8 @@ extern void nvm_unregister_target(struct nvm_target_type *);
 extern int nvm_register(struct request_queue *, struct gendisk *,
 							struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
-extern int nvm_prep_rq(struct request *, struct nvm_rq_data *);
-extern void nvm_unprep_rq(struct request *, struct nvm_rq_data *);
+extern int nvm_prep_rq(struct request *, struct nvm_rq *);
+extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 extern struct nvm_block *nvm_get_blk(struct nvm_lun *, int);
 extern void nvm_put_blk(struct nvm_block *block);
 extern int nvm_internal_rw(struct nvm_dev *, struct nvm_internal_cmd *);
@@ -307,7 +307,7 @@ static inline struct nvm_lun *paddr_to_lun(struct nvm_dev *dev,
 	return &dev->luns[p_addr / (dev->total_pages / dev->nr_luns)];
 }
 
-static inline void nvm_init_rq_data(struct nvm_rq_data *rqdata)
+static inline void nvm_init_rq_data(struct nvm_rq *rqdata)
 {
 	rqdata->phys_sector = 0;
 }
@@ -320,7 +320,7 @@ struct nvm_lun;
 struct nvm_block;
 struct nvm_per_rq {
 };
-struct nvm_rq_data {
+struct nvm_rq {
 };
 struct nvm_internal_cmd {
 };
@@ -342,11 +342,11 @@ static inline int nvm_register(struct request_queue *q, struct gendisk *disk,
 	return -EINVAL;
 }
 static inline void nvm_unregister(struct gendisk *disk) {}
-static inline int nvm_prep_rq(struct request *rq, struct nvm_rq_data *rqdata)
+static inline int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
 	return -EINVAL;
 }
-static inline void nvm_unprep_rq(struct request *rq, struct nvm_rq_data *rqdata)
+static inline void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
 }
 static inline struct nvm_block *nvm_get_blk(struct nvm_lun *lun, int is_gc)
@@ -371,7 +371,7 @@ static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
 {
 	return NULL;
 }
-static inline void nvm_init_rq_data(struct nvm_rq_data *rqdata) { }
+static inline void nvm_init_rq_data(struct nvm_rq *rqdata) { }
 static inline int nvm_attach_sysfs(struct gendisk *dev) { return 0; }
 
 
