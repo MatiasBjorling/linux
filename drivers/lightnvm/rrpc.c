@@ -511,7 +511,7 @@ err:
 	return NULL;
 }
 
-static void rrpc_unprep_rq(struct request *rq, struct nvm_rq_data *rqdata,
+static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 								void *private)
 {
 	struct rrpc *rrpc = private;
@@ -544,7 +544,7 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq_data *rqdata,
 }
 
 static int rrpc_read_rq(struct rrpc *rrpc, struct request *rq,
-						struct nvm_rq_data *rqdata)
+						struct nvm_rq *rqdata)
 {
 	struct nvm_addr *gp;
 	struct nvm_per_rq *pb;
@@ -570,7 +570,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct request *rq,
 }
 
 static int rrpc_write_rq(struct rrpc *rrpc, struct request *rq,
-						struct nvm_rq_data *rqdata)
+						struct nvm_rq *rqdata)
 {
 	struct nvm_per_rq *pb;
 	struct nvm_addr *p;
@@ -599,7 +599,7 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct request *rq,
 	return NVM_PREP_OK;
 }
 
-static int rrpc_prep_rq(struct request *rq, struct nvm_rq_data *rqdata,
+static int rrpc_prep_rq(struct request *rq, struct nvm_rq *rqdata,
 								void *private)
 {
 	struct rrpc *rrpc = private;
