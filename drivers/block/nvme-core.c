@@ -414,7 +414,7 @@ static inline void iod_init(struct nvme_iod *iod, unsigned nbytes,
 	iod->npages = -1;
 	iod->length = nbytes;
 	iod->nents = 0;
-	nvm_init_rq_data(&iod->nvm_rqdata);
+	nvm_init_rq_data(&iod->nvmrq);
 }
 
 static struct nvme_iod *
@@ -641,7 +641,7 @@ static void req_completion(struct nvme_queue *nvmeq, void *ctx,
 	}
 	nvme_free_iod(nvmeq->dev, iod);
 
-	nvm_unprep_rq(req, &iod->nvm_rqdata);
+	nvm_unprep_rq(req, &iod->nvmrq);
 
 	blk_mq_complete_request(req);
 }
@@ -820,7 +820,7 @@ static int nvme_nvm_submit_iod(struct nvme_queue *nvmeq, struct nvme_iod *iod,
 	cmnd->nvm_hb_rw.dsmgmt = cpu_to_le32(dsmgmt);
 	cmnd->nvm_hb_rw.phys_addr =
 			cpu_to_le64(nvme_block_nr(ns,
-						iod->nvm_rqdata.phys_sector));
+						iod->nvmrq.phys_sector));
 
 	if (++nvmeq->sq_tail == nvmeq->q_depth)
 		nvmeq->sq_tail = 0;
@@ -962,7 +962,7 @@ static int nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 	}
 
 	if (ns && ns->type == NVME_NS_NVM) {
-		switch (nvm_prep_rq(req, &iod->nvm_rqdata)) {
+		switch (nvm_prep_rq(req, &iod->nvmrq)) {
 		case NVM_PREP_DONE:
 			goto done_cmd;
 		case NVM_PREP_REQUEUE:

@@ -247,7 +247,7 @@ out:
 int nvme_nvm_prep_internal_rq(struct request *rq, struct nvme_ns *ns,
 				struct nvme_command *c, struct nvme_iod *iod)
 {
-	struct nvm_rq_data *rqdata = &iod->nvm_rqdata;
+	struct nvm_rq *rqdata = &iod->nvmrq;
 	struct nvm_internal_cmd *cmd = rq->special;
 
 	if (!cmd)

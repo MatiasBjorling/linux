@@ -141,7 +141,7 @@ struct nvme_iod {
 	int nents;		/* Used in scatterlist */
 	int length;		/* Of data, in bytes */
 	dma_addr_t first_dma;
-	struct nvm_rq_data nvm_rqdata; /* Physical sectors description of the I/O */
+	struct nvm_rq nvmrq; /* Physical sectors description of the I/O */
 	struct scatterlist meta_sg[1]; /* metadata requires single contiguous buffer */
 	struct scatterlist sg[0];
 };
