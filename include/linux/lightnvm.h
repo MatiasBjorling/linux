@@ -206,9 +206,9 @@ struct nvm_rq {
 	sector_t phys_sector;
 
 	/* target specific */
-	struct rrpc_inflight_rq inflight_rq;
 	struct nvm_addr *addr;
 	unsigned int flags;
+	void *private;
 };
 
 typedef void (nvm_tgt_make_rq)(struct request_queue *, struct bio *);
