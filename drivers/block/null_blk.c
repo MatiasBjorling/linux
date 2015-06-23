@@ -625,16 +625,11 @@ static int null_add_dev(void)
 		goto out_free_nullb;
 
 	if (queue_mode == NULL_Q_MQ) {
-		int cmd_size = sizeof(struct nullb_cmd);
-
-		if (nvm_enable)
-			cmd_size += sizeof(struct nvm_per_rq);
-
 		nullb->tag_set.ops = &null_mq_ops;
 		nullb->tag_set.nr_hw_queues = submit_queues;
 		nullb->tag_set.queue_depth = hw_queue_depth;
 		nullb->tag_set.numa_node = home_node;
-		nullb->tag_set.cmd_size = cmd_size;
+		nullb->tag_set.cmd_size = sizeof(struct nullb_cmd);
 		nullb->tag_set.driver_data = nullb;
 
 		if (!nvm_enable)
