@@ -185,10 +185,6 @@ struct nvm_dev {
 	uint32_t sector_size;
 };
 
-struct nvm_rq {
-		sector_t phys_sector;
-};
-
 /* Logical to physical mapping */
 struct nvm_addr {
 	sector_t addr;
@@ -206,7 +202,10 @@ struct rrpc_inflight_rq {
 	sector_t l_end;
 };
 
-struct nvm_per_rq {
+struct nvm_rq {
+	sector_t phys_sector;
+
+	/* target specific */
 	struct rrpc_inflight_rq inflight_rq;
 	struct nvm_addr *addr;
 	unsigned int flags;
@@ -217,6 +216,7 @@ typedef int (nvm_tgt_prep_rq)(struct request *, struct nvm_rq *, void *);
 typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq *,
 									void *);
 typedef sector_t (nvm_tgt_capacity)(void *);
+typedef struct nvm_rq *(nvm_tgt_get_per_nvmrq_fn)(struct request *);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
 
@@ -229,6 +229,9 @@ struct nvm_target_type {
 	nvm_tgt_prep_rq *prep_rq;
 	nvm_tgt_unprep_rq *unprep_rq;
 	nvm_tgt_capacity *capacity;
+
+	/* callbacks for lightnvm to device driver */
+	nvm_tgt_get_per_nvmrq_fn *get_per_nvmrq;
 
 	/* module-specific init/teardown */
 	nvm_tgt_init_fn *init;
@@ -318,8 +321,6 @@ struct nvm_dev_ops;
 struct nvm_dev;
 struct nvm_lun;
 struct nvm_block;
-struct nvm_per_rq {
-};
 struct nvm_rq {
 };
 struct nvm_internal_cmd {
