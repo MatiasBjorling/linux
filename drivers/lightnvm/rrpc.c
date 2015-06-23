@@ -63,53 +63,52 @@ static void rrpc_invalidate_range(struct rrpc *rrpc, sector_t slba,
 	spin_unlock(&rrpc->rev_lock);
 }
 
-static struct request *rrpc_inflight_laddr_acquire(struct rrpc *rrpc,
+static struct nvm_rq *rrpc_inflight_laddr_acquire(struct rrpc *rrpc,
 					sector_t laddr, unsigned int pages)
 {
-	struct request *rq;
+	struct nvm_rq *rqdata;
 	struct rrpc_inflight_rq *inf;
 
-	rq = blk_mq_alloc_request(rrpc->q_dev, READ, GFP_NOIO, false);
-	if (!rq)
+	rqdata = kzalloc(sizeof(struct nvm_rq), GFP_ATOMIC);
+	if (!rqdata)
 		return ERR_PTR(-ENOMEM);
 
-	inf = rrpc_get_inflight_rq(rq);
+	inf = rrpc_get_inflight_rq(rqdata);
 	if (rrpc_lock_laddr(rrpc, laddr, pages, inf)) {
-		blk_mq_free_request(rq);
+		kfree(rqdata);
 		return NULL;
 	}
 
-	return rq;
+	return rqdata;
 }
 
-static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct request *rq)
+static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqdata)
 {
-	struct rrpc_inflight_rq *inf;
+	struct rrpc_inflight_rq *inf = rrpc_get_inflight_rq(rqdata);
 
-	inf = rrpc_get_inflight_rq(rq);
 	rrpc_unlock_laddr(rrpc, inf->l_start, inf);
 
-	blk_mq_free_request(rq);
+	kfree(rqdata);
 }
 
 static void rrpc_discard(struct rrpc *rrpc, struct bio *bio)
 {
 	sector_t slba = bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 	sector_t len = bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
-	struct request *rq;
+	struct nvm_rq *rqdata;
 
 	do {
-		rq = rrpc_inflight_laddr_acquire(rrpc, slba, len);
+		rqdata = rrpc_inflight_laddr_acquire(rrpc, slba, len);
 		schedule();
-	} while (!rq);
+	} while (!rqdata);
 
-	if (IS_ERR(rq)) {
+	if (IS_ERR(rqdata)) {
 		bio_io_error(bio);
 		return;
 	}
 
 	rrpc_invalidate_range(rrpc, slba, len);
-	rrpc_inflight_laddr_release(rrpc, rq);
+	rrpc_inflight_laddr_release(rrpc, rqdata);
 }
 
 /* requires lun->lock taken */
@@ -178,7 +177,7 @@ static int rrpc_move_valid_pages(struct rrpc *rrpc, struct nvm_block *block)
 		.timeout = 30,
 	};
 	struct nvm_rev_addr *rev;
-	struct request *rq;
+	struct nvm_rq *rqdata;
 	struct page *page;
 	int slot;
 	int ret;
@@ -206,8 +205,8 @@ try:
 			continue;
 		}
 
-		rq = rrpc_inflight_laddr_acquire(rrpc, rev->addr, 1);
-		if (!rq) {
+		rqdata = rrpc_inflight_laddr_acquire(rrpc, rev->addr, 1);
+		if (IS_ERR_OR_NULL(rqdata)) {
 			spin_unlock(&rrpc->rev_lock);
 			schedule();
 			goto try;
@@ -234,7 +233,7 @@ try:
 			goto out;
 		}
 
-		rrpc_inflight_laddr_release(rrpc, rq);
+		rrpc_inflight_laddr_release(rrpc, rqdata);
 	}
 
 	mempool_free(page, rrpc->page_pool);
@@ -515,14 +514,13 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 								void *private)
 {
 	struct rrpc *rrpc = private;
-	struct nvm_per_rq *pb = get_per_rq_data(rq);
-	struct nvm_addr *p = pb->addr;
+	struct nvm_addr *p = rqdata->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
 	struct rrpc_block_gc *gcb;
 	int cmnt_size;
 
-	rrpc_unlock_rq(rrpc, rq);
+	rrpc_unlock_rq(rrpc, rq, rqdata);
 
 	if (rq_data_dir(rq) == WRITE) {
 		cmnt_size = atomic_inc_return(&block->data_cmnt_size);
@@ -547,10 +545,9 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct request *rq,
 						struct nvm_rq *rqdata)
 {
 	struct nvm_addr *gp;
-	struct nvm_per_rq *pb;
 	sector_t l_addr = nvm_get_laddr(rq);
 
-	if (rrpc_lock_rq(rrpc, rq))
+	if (rrpc_lock_rq(rrpc, rq, rqdata))
 		return NVM_PREP_REQUEUE;
 
 	BUG_ON(!(l_addr >= 0 && l_addr < rrpc->nr_pages));
@@ -559,20 +556,19 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct request *rq,
 	if (gp->block) {
 		rqdata->phys_sector = nvm_get_sector(gp->addr);
 	} else {
-		rrpc_unlock_rq(rrpc, rq);
+		rrpc_unlock_rq(rrpc, rq, rqdata);
 		blk_mq_end_request(rq, 0);
 		return NVM_PREP_DONE;
 	}
 
-	pb = get_per_rq_data(rq);
-	pb->addr = gp;
+	rqdata->addr = gp;
+
 	return NVM_PREP_OK;
 }
 
 static int rrpc_write_rq(struct rrpc *rrpc, struct request *rq,
 						struct nvm_rq *rqdata)
 {
-	struct nvm_per_rq *pb;
 	struct nvm_addr *p;
 	int is_gc = 0;
 	sector_t l_addr = nvm_get_laddr(rq);
@@ -580,21 +576,19 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct request *rq,
 	if (rq->special)
 		is_gc = 1;
 
-	if (rrpc_lock_rq(rrpc, rq))
+	if (rrpc_lock_rq(rrpc, rq, rqdata))
 		return NVM_PREP_REQUEUE;
 
 	p = rrpc_map_page(rrpc, l_addr, is_gc);
 	if (!p) {
 		BUG_ON(is_gc);
-		rrpc_unlock_rq(rrpc, rq);
+		rrpc_unlock_rq(rrpc, rq, rqdata);
 		rrpc_gc_kick(rrpc);
 		return NVM_PREP_REQUEUE;
 	}
 
 	rqdata->phys_sector = nvm_get_sector(p->addr);
-
-	pb = get_per_rq_data(rq);
-	pb->addr = p;
+	rqdata->addr = p;
 
 	return NVM_PREP_OK;
 }

@@ -124,14 +124,6 @@ static inline sector_t nvm_get_sector(sector_t laddr)
 	return laddr * NR_PHY_IN_LOG;
 }
 
-static inline struct nvm_per_rq *get_per_rq_data(struct request *rq)
-{
-	struct request_queue *q = rq->q;
-
-	return blk_mq_rq_to_pdu(rq) + q->tag_set->cmd_size -
-						sizeof(struct nvm_per_rq);
-}
-
 static inline int request_intersects(struct rrpc_inflight_rq *r,
 				sector_t laddr_start, sector_t laddr_end)
 {
@@ -173,18 +165,17 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 	return __rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
 
-static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct request *rq)
+static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
 {
-	struct nvm_per_rq *pd = get_per_rq_data(rq);
-
-	return &pd->inflight_rq;
+	return &n->inflight_rq;
 }
 
-static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq)
+static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq,
+							struct nvm_rq *rqdata)
 {
 	sector_t laddr = nvm_get_laddr(rq);
 	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
-	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rq);
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
 	if (rq->special)
 		return 0;
@@ -204,16 +195,17 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 	spin_unlock_irqrestore(&map->lock, flags);
 }
 
-static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct request *rq)
+static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct request *rq,
+							struct nvm_rq *rqdata)
 {
 	sector_t laddr = nvm_get_laddr(rq);
 	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
-	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rq);
-
-	BUG_ON((laddr + pages) > rrpc->nr_pages);
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
 	if (rq->special)
 		return;
+
+	BUG_ON((laddr + pages) > rrpc->nr_pages);
 
 	rrpc_unlock_laddr(rrpc, laddr, r);
 }
