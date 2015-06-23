@@ -368,7 +368,7 @@ static void nvm_core_free(struct nvm_dev *dev)
 	kfree(dev);
 }
 
-static int nvm_core_init(struct nvm_dev *dev, int max_qdepth)
+static int nvm_core_init(struct nvm_dev *dev)
 {
 	dev->nr_luns = dev->identity.nchannels;
 	dev->sector_size = EXPOSED_PAGE_SIZE;
@@ -414,8 +414,6 @@ int nvm_validate_responsibility(struct nvm_dev *dev)
 
 int nvm_init(struct nvm_dev *dev)
 {
-	struct blk_mq_tag_set *tag_set = dev->q->tag_set;
-	int max_qdepth;
 	int ret = 0;
 
 	if (!dev->q || !dev->ops)
@@ -427,13 +425,10 @@ int nvm_init(struct nvm_dev *dev)
 		goto err;
 	}
 
-	max_qdepth = tag_set->queue_depth * tag_set->nr_hw_queues;
-
-	pr_debug("nvm dev: ver %u type %u chnls %u max qdepth: %i\n",
+	pr_debug("nvm dev: ver %u type %u chnls %u\n",
 			dev->identity.ver_id,
 			dev->identity.nvm_type,
-			dev->identity.nchannels,
-			max_qdepth);
+			dev->identity.nchannels);
 
 	ret = nvm_validate_features(dev);
 	if (ret) {
@@ -447,7 +442,7 @@ int nvm_init(struct nvm_dev *dev)
 		goto err;
 	}
 
-	ret = nvm_core_init(dev, max_qdepth);
+	ret = nvm_core_init(dev);
 	if (ret) {
 		pr_err("nvm: could not initialize core structures.\n");
 		goto err;
