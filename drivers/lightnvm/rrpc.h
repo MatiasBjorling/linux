@@ -167,7 +167,7 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 
 static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
 {
-	return &n->inflight_rq;
+	return &n->private;
 }
 
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq,
