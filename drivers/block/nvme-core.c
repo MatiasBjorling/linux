@@ -616,7 +616,7 @@ static void req_completion(struct nvme_queue *nvmeq, void *ctx,
 		req->errors = 0;
 	if (req->cmd_type == REQ_TYPE_DRV_PRIV) {
 		u32 result = le32_to_cpup(&cqe->result);
-		req->sense = (void *)(uintptr_t)result;
+		req->special = (void *)(uintptr_t)result;
 
 		if (blk_rq_pos(req) != (sector_t) -1)
 			nvm_unprep_rq(req, &iod->nvmrq);
@@ -1063,7 +1063,7 @@ int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 	if (bio)
 		blk_rq_unmap_user(bio);
 	if (result)
-		*result = (u32)(uintptr_t)req->sense;
+		*result = (u32)(uintptr_t)req->special;
 	ret = req->errors;
  out:
 	blk_mq_free_request(req);
