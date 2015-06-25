@@ -410,34 +410,9 @@ static int null_nvm_get_features(struct request_queue *q,
 	return 0;
 }
 
-static int null_nvm_internal_rw(struct request_queue *q,
-						struct nvm_internal_cmd *cmd)
-{
-	struct request *req;
-	int ret;
-
-	req = blk_mq_alloc_request(q, cmd->rw, GFP_KERNEL, false);
-	if (IS_ERR(req))
-		return PTR_ERR(req);
-
-	req->cmd_type = REQ_TYPE_DRV_PRIV;
-	req->cmd_flags |= REQ_FAILFAST_DRIVER;
-	req->__data_len = 0;
-	req->__sector = (sector_t) -1;
-	req->bio = req->biotail = NULL;
-	req->timeout = 30;
-	req->special = cmd;
-
-	blk_execute_rq(req->q, NULL, req, 0);
-	ret = req->errors;
-	blk_mq_free_request(req);
-	return ret;
-}
-
 static struct nvm_dev_ops null_nvm_dev_ops = {
 	.identify		= null_nvm_id,
 	.get_features		= null_nvm_get_features,
-	.internal_rw		= null_nvm_internal_rw,
 };
 #else
 static struct nvm_dev_ops null_nvm_dev_ops;
