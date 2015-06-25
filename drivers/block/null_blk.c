@@ -410,9 +410,36 @@ static int null_nvm_get_features(struct request_queue *q,
 	return 0;
 }
 
+static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
+			struct nvm_target_instance *ins, unsigned long flags)
+{
+	struct request *rq;
+
+	rq = blk_mq_alloc_request(q, bio_rw(bio), GFP_KERNEL, 0);
+	if (IS_ERR(rq))
+		return -ENOMEM;
+
+	rq->cmd_type = REQ_TYPE_DRV_PRIV;
+	rq->__sector = bio->bi_iter.bi_sector;
+	rq->ioprio = bio_prio(bio);
+
+	if (bio_has_data(bio))
+		rq->nr_phys_segments = bio_phys_segments(q, bio);
+
+	rq->__data_len = bio->bi_iter.bi_size;
+	rq->bio = rq->biotail = bio;
+	rq->special = ins;
+	rq->cmd = (char *)flags;
+
+	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
+
+	return 0;
+}
+
 static struct nvm_dev_ops null_nvm_dev_ops = {
-	.identify		= null_nvm_id,
-	.get_features		= null_nvm_get_features,
+	.identify	= null_nvm_id,
+	.get_features	= null_nvm_get_features,
+	.submit_io	= null_nvm_submit_io,
 };
 #else
 static struct nvm_dev_ops null_nvm_dev_ops;
