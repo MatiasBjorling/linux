@@ -156,14 +156,15 @@ out:
 }
 EXPORT_SYMBOL(nvm_alloc_addr);
 
-int nvm_internal_rw(struct nvm_dev *dev, struct nvm_internal_cmd *cmd)
+int nvm_submit_io(struct nvm_dev *dev, struct bio *bio,
+			struct nvm_target_instance *ins, unsigned long flags)
 {
-	if (!dev->ops->internal_rw)
+	if (!dev->ops->submit_io)
 		return 0;
 
-	return dev->ops->internal_rw(dev->q, cmd);
+	return dev->ops->submit_io(dev->q, bio, ins, flags);
 }
-EXPORT_SYMBOL(nvm_internal_rw);
+EXPORT_SYMBOL(nvm_submit_io);
 
 /* Send erase command to device */
 int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *block)
@@ -766,63 +767,24 @@ EXPORT_SYMBOL(nvm_unregister);
 
 int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
-	struct nvm_target_instance *ins;
-	struct bio *bio;
+	struct nvm_target_instance *ins = rq->special;
 
-	if (rqdata->phys_sector)
+	if (blk_rq_pos(rq) == (sector_t) -1)
 		return 0;
 
-	if (rq->cmd_type == REQ_TYPE_DRV_PRIV) {
-		struct nvm_internal_cmd *cmd = rq->special;
+	WARN_ON(rqdata->phys_sector);
 
-		/* internal nvme request with no relation to target */
-		if (!cmd)
-			return 0;
-
-		ins = cmd->target;
-	} else {
-		bio = rq->bio;
-		if (unlikely(!bio))
-			return 0;
-
-		if (unlikely(!bio->bi_nvm)) {
-			if (bio_data_dir(bio) == WRITE) {
-				pr_warn("nvm: attempting to write without FTL.\n");
-				return NVM_PREP_ERROR;
-			}
-			return NVM_PREP_OK;
-		}
-
-		ins = container_of(bio->bi_nvm, struct nvm_target_instance,
-								payload);
-	}
 	return ins->tt->prep_rq(rq, rqdata, ins);
 }
 EXPORT_SYMBOL(nvm_prep_rq);
 
 void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
-	struct nvm_target_instance *ins;
-	struct bio *bio;
+	struct nvm_target_instance *ins = rq->special;
 
 	if (!rqdata->phys_sector)
 		return;
 
-	if (rq->cmd_type == REQ_TYPE_DRV_PRIV) {
-		struct nvm_internal_cmd *cmd = rq->special;
-
-		/* internal nvme request with no relation to target*/
-		if (!cmd)
-			return;
-
-		ins = cmd->target;
-	} else {
-		bio = rq->bio;
-		if (unlikely(!bio))
-			return;
-		ins = container_of(bio->bi_nvm, struct nvm_target_instance,
-								payload);
-	}
 	ins->tt->unprep_rq(rq, rqdata, ins);
 }
 EXPORT_SYMBOL(nvm_unprep_rq);

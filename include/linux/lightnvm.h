@@ -7,6 +7,9 @@ enum {
 	NVM_PREP_REQUEUE = 2,
 	NVM_PREP_DONE = 3,
 	NVM_PREP_ERROR = 4,
+
+	NVM_IOTYPE_NONE = 0,
+	NVM_IOTYPE_GC = 1,
 };
 
 #ifdef CONFIG_NVM
@@ -69,13 +72,8 @@ struct nvm_target {
 	struct gendisk *disk;
 };
 
-struct nvm_internal_cmd {
-	void *target;
-	sector_t phys_lba;
-	int rw;
-	void *buffer;
-	unsigned bufflen;
-	unsigned timeout;
+struct nvm_target_instance {
+	struct nvm_target_type *tt;
 };
 
 extern void nvm_unregister(struct gendisk *);
@@ -91,8 +89,8 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 				nvm_l2p_update_fn *, void *);
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
-typedef int (nvm_internal_rw_fn)(struct request_queue *,
-						struct nvm_internal_cmd *);
+typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
+			struct nvm_target_instance *, unsigned long flags);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
 struct nvm_dev_ops {
@@ -103,7 +101,7 @@ struct nvm_dev_ops {
 	nvm_op_bb_tbl_fn	*set_bb_tbl;
 	nvm_op_bb_tbl_fn	*get_bb_tbl;
 
-	nvm_internal_rw_fn	*internal_rw;
+	nvm_submit_io_fn	*submit_io;
 	nvm_erase_blk_fn	*erase_block;
 };
 
@@ -241,22 +239,18 @@ struct nvm_target_type {
 	struct list_head list;
 };
 
-struct nvm_target_instance {
-	struct bio_nvm_payload payload;
-	struct nvm_target_type *tt;
-};
-
 extern struct nvm_target_type *nvm_find_target_type(const char *);
 extern int nvm_register_target(struct nvm_target_type *);
 extern void nvm_unregister_target(struct nvm_target_type *);
 extern int nvm_register(struct request_queue *, struct gendisk *,
 							struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
+extern int nvm_submit_io(struct nvm_dev *, struct bio *,
+			struct nvm_target_instance *, unsigned long flags);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 extern struct nvm_block *nvm_get_blk(struct nvm_lun *, int);
 extern void nvm_put_blk(struct nvm_block *block);
-extern int nvm_internal_rw(struct nvm_dev *, struct nvm_internal_cmd *);
 extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
 extern sector_t nvm_alloc_addr(struct nvm_block *);
 static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
@@ -310,6 +304,11 @@ static inline struct nvm_lun *paddr_to_lun(struct nvm_dev *dev,
 	return &dev->luns[p_addr / (dev->total_pages / dev->nr_luns)];
 }
 
+static inline unsigned long nvm_get_rq_flags(struct request *rq)
+{
+	return (unsigned long)rq->cmd;
+}
+
 static inline void nvm_init_rq_data(struct nvm_rq *rqdata)
 {
 	rqdata->phys_sector = 0;
@@ -322,8 +321,6 @@ struct nvm_dev;
 struct nvm_lun;
 struct nvm_block;
 struct nvm_rq {
-};
-struct nvm_internal_cmd {
 };
 struct nvm_target_type;
 struct nvm_target_instance;
@@ -355,11 +352,6 @@ static inline struct nvm_block *nvm_get_blk(struct nvm_lun *lun, int is_gc)
 	return NULL;
 }
 static inline void nvm_put_blk(struct nvm_block *blk) {}
-static inline int nvm_internal_rw(struct nvm_dev *dev,
-					const struct nvm_internal_cmd *cmd)
-{
-	return -EINVAL;
-}
 static inline int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return -EINVAL;
