@@ -110,12 +110,6 @@ struct rrpc_block_gc {
 
 static inline sector_t nvm_get_laddr(struct request *rq)
 {
-	if (rq->special) {
-		struct nvm_internal_cmd *cmd = rq->special;
-
-		return cmd->phys_lba;
-	}
-
 	return blk_rq_pos(rq) / NR_PHY_IN_LOG;
 }
 

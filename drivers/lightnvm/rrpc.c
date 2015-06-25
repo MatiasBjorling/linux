@@ -158,6 +158,16 @@ static void rrpc_gc_timer(unsigned long data)
 	mod_timer(&rrpc->gc_timer, jiffies + msecs_to_jiffies(10));
 }
 
+static void rrpc_end_sync_bio(struct bio *bio, int error)
+{
+	struct completion *waiting = bio->bi_private;
+
+	if (error)
+		pr_err("nvm: gc request failed (%u).\n", error);
+
+	complete(waiting);
+}
+
 /*
  * rrpc_move_valid_pages -- migrate live data off the block
  * @rrpc: the 'rrpc' structure
@@ -170,21 +180,25 @@ static void rrpc_gc_timer(unsigned long data)
  */
 static int rrpc_move_valid_pages(struct rrpc *rrpc, struct nvm_block *block)
 {
+	struct request_queue *q = rrpc->q_dev;
 	struct nvm_dev *dev = rrpc->q_nvm;
 	struct nvm_lun *lun = block->lun;
-	struct nvm_internal_cmd cmd = {
-		.target = &rrpc->instance,
-		.timeout = 30,
-	};
 	struct nvm_rev_addr *rev;
 	struct nvm_rq *rqdata;
+	struct bio *bio;
 	struct page *page;
 	int slot;
-	int ret;
-	sector_t phys_addr;
+	sector_t phys_addr, what;
+	DECLARE_COMPLETION_ONSTACK(wait);
 
 	if (bitmap_full(block->invalid_pages, lun->nr_pages_per_blk))
 		return 0;
+
+	bio = bio_alloc(GFP_NOIO, 1);
+	if (!bio) {
+		pr_err("nvm: could not alloc bio to gc\n");
+		return -ENOMEM;
+	}
 
 	page = mempool_alloc(rrpc->page_pool, GFP_NOIO);
 
@@ -214,31 +228,42 @@ try:
 
 		spin_unlock(&rrpc->rev_lock);
 
-		cmd.phys_lba = rev->addr;
-		cmd.rw = READ;
-		cmd.buffer = page_address(page);
-		cmd.bufflen = EXPOSED_PAGE_SIZE;
-		ret = nvm_internal_rw(dev, &cmd);
-		if (ret) {
-			pr_err("nvm: gc read failure.\n");
-			goto out;
-		}
+		/* Perform read to do GC */
+		bio->bi_iter.bi_sector = nvm_get_sector(rev->addr);
+		what = rev->addr;
+		bio->bi_rw = READ;
+		bio->bi_private = &wait;
+		bio->bi_end_io = rrpc_end_sync_bio;
+
+		/* TODO: may fail when EXP_PG_SIZE > PAGE_SIZE */
+		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
+
+		nvm_submit_io(dev, bio, &rrpc->instance, NVM_IOTYPE_GC);
+		wait_for_completion_io(&wait);
+
+		bio_reset(bio);
+		reinit_completion(&wait);
+
+		bio->bi_iter.bi_sector = nvm_get_sector(rev->addr);
+		bio->bi_rw = WRITE;
+		bio->bi_private = &wait;
+		bio->bi_end_io = rrpc_end_sync_bio;
+
+		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
 
 		/* turn the command around and write the data back to a new
 		 * address */
-		cmd.rw = WRITE;
-		ret = nvm_internal_rw(dev, &cmd);
-		if (ret) {
-			pr_err("nvm: gc write failure.\n");
-			goto out;
-		}
+		nvm_submit_io(dev, bio, &rrpc->instance, NVM_IOTYPE_GC);
+		wait_for_completion_io(&wait);
 
 		rrpc_inflight_laddr_release(rrpc, rqdata);
+
+		bio_reset(bio);
 	}
 
 	mempool_free(page, rrpc->page_pool);
+	bio_put(bio);
 
-out:
 	if (!bitmap_full(block->invalid_pages, lun->nr_pages_per_blk)) {
 		pr_err("nvm: failed to garbage collect block\n");
 		return -EIO;
@@ -426,7 +451,10 @@ struct nvm_addr *nvm_update_map(struct rrpc *rrpc, sector_t l_addr,
 	struct nvm_addr *gp;
 	struct nvm_rev_addr *rev;
 
-	BUG_ON(l_addr >= rrpc->nr_pages);
+	if (l_addr >= rrpc->nr_pages) {
+		printk("\n\n%llu %llu\n\n\n", l_addr, rrpc->nr_pages);
+		BUG();
+	}
 
 	gp = &rrpc->trans_map[l_addr];
 	spin_lock(&rrpc->rev_lock);
@@ -570,11 +598,8 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct request *rq,
 						struct nvm_rq *rqdata)
 {
 	struct nvm_addr *p;
-	int is_gc = 0;
+	int is_gc = nvm_get_rq_flags(rq) & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(rq);
-
-	if (rq->special)
-		is_gc = 1;
 
 	if (rrpc_lock_rq(rrpc, rq, rqdata))
 		return NVM_PREP_REQUEUE;
@@ -613,10 +638,7 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 		return;
 	}
 
-	bio->bi_nvm = &rrpc->instance.payload;
-	bio->bi_bdev = rrpc->q_bdev;
-
-	generic_make_request(bio);
+	nvm_submit_io(rrpc->q_nvm, bio, &rrpc->instance, NVM_IOTYPE_NONE);
 }
 
 static void rrpc_gc_free(struct rrpc *rrpc)
