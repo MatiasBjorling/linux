@@ -469,18 +469,19 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 	.erase_block		= nvme_nvm_erase_block,
 };
 
-#else
-static struct nvm_dev_ops nvme_nvm_dev_ops;
-static nvm_data_rq;
-
-void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
-			struct nvme_command *c, struct nvme_iod *iod)
-{
-}
-#endif /* CONFIG_NVM */
-
 int nvme_nvm_register(struct request_queue *q, struct gendisk *disk)
 {
 	return nvm_register(q, disk, &nvme_nvm_dev_ops);
 }
+#else
+void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
+			struct nvme_command *c, struct nvme_iod *iod)
+{
+}
 
+int nvme_nvm_register(struct request_queue *q, struct gendisk *disk)
+{
+	return 0;
+}
+
+#endif /* CONFIG_NVM */
