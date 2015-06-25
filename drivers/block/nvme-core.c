@@ -1025,7 +1025,7 @@ static irqreturn_t nvme_irq_check(int irq, void *data)
  */
 int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 		void *buffer, void __user *ubuffer, unsigned bufflen,
-		u32 *result, unsigned timeout, void *special)
+		u32 *result, unsigned timeout)
 {
 	bool write = cmd->common.opcode & 1;
 	struct bio *bio = NULL;
@@ -1046,7 +1046,7 @@ int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 
 	req->cmd = (unsigned char *)cmd;
 	req->cmd_len = sizeof(struct nvme_command);
-	req->special = special;
+	req->special = (void *)0;
 
 	if (buffer && bufflen) {
 		ret = blk_rq_map_kern(q, req, buffer, bufflen, __GFP_WAIT);
@@ -1073,8 +1073,7 @@ int __nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 int nvme_submit_sync_cmd(struct request_queue *q, struct nvme_command *cmd,
 		void *buffer, unsigned bufflen)
 {
-	return __nvme_submit_sync_cmd(q, cmd, buffer, NULL, bufflen, NULL, 0,
-									NULL);
+	return __nvme_submit_sync_cmd(q, cmd, buffer, NULL, bufflen, NULL, 0);
 }
 
 static int nvme_submit_async_admin_req(struct nvme_dev *dev)
@@ -1237,7 +1236,7 @@ int nvme_get_features(struct nvme_dev *dev, unsigned fid, unsigned nsid,
 	c.features.fid = cpu_to_le32(fid);
 
 	return __nvme_submit_sync_cmd(dev->admin_q, &c, NULL, NULL, 0,
-			result, 0, NULL);
+			result, 0);
 }
 
 int nvme_set_features(struct nvme_dev *dev, unsigned fid, unsigned dword11,
@@ -1252,7 +1251,7 @@ int nvme_set_features(struct nvme_dev *dev, unsigned fid, unsigned dword11,
 	c.features.dword11 = cpu_to_le32(dword11);
 
 	return __nvme_submit_sync_cmd(dev->admin_q, &c, NULL, NULL, 0,
-			result, 0, NULL);
+			result, 0);
 }
 
 int nvme_get_log_page(struct nvme_dev *dev, struct nvme_smart_log **log)
@@ -1816,7 +1815,7 @@ static int nvme_submit_io(struct nvme_ns *ns, struct nvme_user_io __user *uio)
 	c.rw.metadata = cpu_to_le64(meta_dma);
 
 	status = __nvme_submit_sync_cmd(ns->queue, &c, NULL,
-			(void __user *)io.addr, length, NULL, 0, NULL);
+			(void __user *)io.addr, length, NULL, 0);
  unmap:
 	if (meta) {
 		if (status == NVME_SC_SUCCESS && !write) {
@@ -1860,7 +1859,7 @@ static int nvme_user_cmd(struct nvme_dev *dev, struct nvme_ns *ns,
 
 	status = __nvme_submit_sync_cmd(ns ? ns->queue : dev->admin_q, &c,
 			NULL, (void __user *)cmd.addr, cmd.data_len,
-			&cmd.result, timeout, NULL);
+			&cmd.result, timeout);
 	if (status >= 0) {
 		if (put_user(cmd.result, &ucmd->result))
 			return -EFAULT;
