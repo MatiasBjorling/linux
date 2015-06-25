@@ -2261,8 +2261,7 @@ static int nvme_dev_add(struct nvme_dev *dev)
 	int res;
 	unsigned nn, i;
 	struct nvme_id_ctrl *ctrl;
-	u64 cap = readq(&dev->bar->cap);
-	int shift = NVME_CAP_MPSMIN(cap) + 12;
+	int shift = NVME_CAP_MPSMIN(readq(&dev->bar->cap)) + 12;
 
 	res = nvme_identify_ctrl(dev, &ctrl);
 	if (res) {
@@ -2300,10 +2299,8 @@ static int nvme_dev_add(struct nvme_dev *dev)
 	dev->tagset.queue_depth =
 				min_t(int, dev->q_depth, BLK_MQ_MAX_DEPTH) - 1;
 	dev->tagset.cmd_size = nvme_cmd_size(dev);
+	dev->tagset.flags = BLK_MQ_F_SHOULD_MERGE;
 	dev->tagset.driver_data = dev;
-
-	if (!NVME_CAP_LIGHTNVM(cap))
-		dev->tagset.flags = BLK_MQ_F_SHOULD_MERGE;
 
 	if (blk_mq_alloc_tag_set(&dev->tagset))
 		return 0;
