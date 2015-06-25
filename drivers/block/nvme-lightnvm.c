@@ -26,13 +26,135 @@
 
 #ifdef CONFIG_NVM
 
+enum nvme_nvm_opcode {
+	nvme_nvm_cmd_hb_write	= 0x81,
+	nvme_nvm_cmd_hb_read	= 0x02,
+	nvme_nvm_cmd_phys_write	= 0x91,
+	nvme_nvm_cmd_phys_read	= 0x92,
+	nvme_nvm_cmd_erase	= 0x90,
+};
+
+enum nvme_nvm_admin_opcode {
+	nvme_nvm_admin_identify		= 0xe2,
+	nvme_nvm_admin_get_features	= 0xe6,
+	nvme_nvm_admin_set_resp		= 0xe5,
+	nvme_nvm_admin_get_l2p_tbl	= 0xea,
+	nvme_nvm_admin_get_bb_tbl	= 0xf2,
+	nvme_nvm_admin_set_bb_tbl	= 0xf1,
+};
+
+struct nvme_nvm_hb_rw {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__u64			rsvd2;
+	__le64			metadata;
+	__le64			prp1;
+	__le64			prp2;
+	__le64			slba;
+	__le16			length;
+	__le16			control;
+	__le32			dsmgmt;
+	__le64			phys_addr;
+};
+
+struct nvme_nvm_identify {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__u64			rsvd[2];
+	__le64			prp1;
+	__le64			prp2;
+	__le32			chnl_off;
+	__u32			rsvd11[5];
+};
+
+struct nvme_nvm_l2ptbl {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__le32			cdw2[4];
+	__le64			prp1;
+	__le64			prp2;
+	__le64			slba;
+	__le32			nlb;
+	__le16			cdw14[6];
+};
+
+struct nvme_nvm_bbtbl {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__u64			rsvd[2];
+	__le64			prp1;
+	__le64			prp2;
+	__le32			prp1_len;
+	__le32			prp2_len;
+	__le32			lbb;
+	__u32			rsvd11[3];
+};
+
+struct nvme_nvm_set_resp {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__u64			rsvd[2];
+	__le64			prp1;
+	__le64			prp2;
+	__le64			resp;
+	__u32			rsvd11[4];
+};
+
+struct nvme_nvm_erase_blk {
+	__u8			opcode;
+	__u8			flags;
+	__u16			command_id;
+	__le32			nsid;
+	__u64			rsvd[2];
+	__le64			prp1;
+	__le64			prp2;
+	__le64			blk_addr;
+	__u32			rsvd11[4];
+};
+
+struct nvme_nvm_command {
+	union {
+		struct nvme_common_command common;
+		struct nvme_nvm_identify nvm_identify;
+		struct nvme_nvm_hb_rw nvm_hb_rw;
+		struct nvme_nvm_l2ptbl nvm_l2p;
+		struct nvme_nvm_bbtbl nvm_get_bb;
+		struct nvme_nvm_bbtbl nvm_set_bb;
+		struct nvme_nvm_set_resp nvm_resp;
+		struct nvme_nvm_erase_blk nvm_erase;
+	};
+};
+
+/*
+ * Check we didin't inadvertently grow the command struct
+ */
+static inline void _nvme_nvm_check_size(void)
+{
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_identify) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_hb_rw) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_l2ptbl) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_bbtbl) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_set_resp) != 64);
+	BUILD_BUG_ON(sizeof(struct nvme_nvm_erase_blk) != 64);
+}
+
 static int init_chnls(struct request_queue *q, struct nvm_id *nvm_id,
 						struct nvme_nvm_id *nvme_nvm_id)
 {
 	struct nvme_nvm_id_chnl *src = nvme_nvm_id->chnls;
 	struct nvm_id_chnl *dst = nvm_id->chnls;
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_identify.opcode = nvme_nvm_admin_identify,
 		.nvm_identify.nsid = cpu_to_le32(ns->ns_id),
 	};
@@ -66,7 +188,8 @@ static int init_chnls(struct request_queue *q, struct nvm_id *nvm_id,
 
 		c.nvm_identify.chnl_off = off;
 
-		ret = nvme_submit_sync_cmd(q, &c, nvme_nvm_id, 4096);
+		ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c,
+							nvme_nvm_id, 4096);
 		if (ret)
 			return ret;
 	}
@@ -77,7 +200,7 @@ static int nvme_nvm_identify(struct request_queue *q, struct nvm_id *nvm_id)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_nvm_id *nvme_nvm_id;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_identify.opcode = nvme_nvm_admin_identify,
 		.nvm_identify.nsid = cpu_to_le32(ns->ns_id),
 		.nvm_identify.chnl_off = 0,
@@ -88,7 +211,8 @@ static int nvme_nvm_identify(struct request_queue *q, struct nvm_id *nvm_id)
 	if (!nvme_nvm_id)
 		return -ENOMEM;
 
-	ret = nvme_submit_sync_cmd(q, &c, nvme_nvm_id, 4096);
+	ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c, nvme_nvm_id,
+									4096);
 	if (ret) {
 		ret = -EIO;
 		goto out;
@@ -116,7 +240,7 @@ static int nvme_nvm_get_features(struct request_queue *q,
 						struct nvm_get_features *gf)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.common.opcode = nvme_nvm_admin_get_features,
 		.common.nsid = ns->ns_id,
 	};
@@ -128,7 +252,7 @@ static int nvme_nvm_get_features(struct request_queue *q,
 	if (!resp)
 		return -ENOMEM;
 
-	ret = nvme_submit_sync_cmd(q, &c, resp, sz);
+	ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c, resp, sz);
 	if (ret)
 		goto done;
 
@@ -143,13 +267,13 @@ done:
 static int nvme_nvm_set_resp(struct request_queue *q, u64 resp)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_resp.opcode = nvme_nvm_admin_set_resp,
 		.nvm_resp.nsid = cpu_to_le32(ns->ns_id),
 		.nvm_resp.resp = cpu_to_le64(resp),
 	};
 
-	return nvme_submit_sync_cmd(q, &c, NULL, 0);
+	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
 static int nvme_nvm_get_l2p_tbl(struct request_queue *q, u64 slba, u64 nlb,
@@ -157,7 +281,7 @@ static int nvme_nvm_get_l2p_tbl(struct request_queue *q, u64 slba, u64 nlb,
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_l2p.opcode = nvme_nvm_admin_get_l2p_tbl,
 		.nvm_l2p.nsid = cpu_to_le32(ns->ns_id),
 	};
@@ -177,7 +301,8 @@ static int nvme_nvm_get_l2p_tbl(struct request_queue *q, u64 slba, u64 nlb,
 		c.nvm_l2p.slba = cmd_slba;
 		c.nvm_l2p.nlb = cmd_nlb;
 
-		ret = nvme_submit_sync_cmd(q, &c, entries, len);
+		ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c,
+								entries, len);
 		if (ret) {
 			dev_err(dev->dev, "L2P table transfer failed (%d)\n",
 									ret);
@@ -210,7 +335,7 @@ static int nvme_nvm_get_bb_tbl(struct request_queue *q, int lunid,
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_get_bb.opcode = nvme_nvm_admin_get_bb_tbl,
 		.nvm_get_bb.nsid = cpu_to_le32(ns->ns_id),
 		.nvm_get_bb.lbb = cpu_to_le32(lunid),
@@ -226,7 +351,8 @@ static int nvme_nvm_get_bb_tbl(struct request_queue *q, int lunid,
 
 	bitmap_zero(bb_bitmap, nr_blocks);
 
-	ret = nvme_submit_sync_cmd(q, &c, bb_bitmap, bb_bitmap_size);
+	ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c, bb_bitmap,
+								bb_bitmap_size);
 	if (ret) {
 		dev_err(dev->dev, "get bad block table failed (%d)\n", ret);
 		ret = -EIO;
@@ -245,17 +371,18 @@ out:
 }
 
 void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
-				struct nvme_command *c, struct nvme_iod *iod)
+			struct nvme_command *c, struct nvme_iod *iod)
 {
+	struct nvme_nvm_command *cc = (struct nvme_nvm_command *)c;
 	struct nvm_rq *rqdata = &iod->nvmrq;
 
-	c->nvm_hb_rw.opcode = (rq_data_dir(rq) ?
+	cc->nvm_hb_rw.opcode = (rq_data_dir(rq) ?
 				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
-	c->nvm_hb_rw.nsid = cpu_to_le32(ns->ns_id);
-	c->nvm_hb_rw.slba = cpu_to_le64(nvme_block_nr(ns, blk_rq_pos(rq)));
-	c->nvm_hb_rw.length = cpu_to_le16(
+	cc->nvm_hb_rw.nsid = cpu_to_le32(ns->ns_id);
+	cc->nvm_hb_rw.slba = cpu_to_le64(nvme_block_nr(ns, blk_rq_pos(rq)));
+	cc->nvm_hb_rw.length = cpu_to_le16(
 			(blk_rq_bytes(rq) >> ns->lba_shift) - 1);
-	c->nvm_hb_rw.phys_addr =
+	cc->nvm_hb_rw.phys_addr =
 		cpu_to_le64(nvme_block_nr(ns, rqdata->phys_sector));
 }
 
@@ -288,13 +415,13 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_command c = {
+	struct nvme_nvm_command c = {
 		.nvm_erase.opcode = nvme_nvm_cmd_erase,
 		.nvm_erase.nsid = cpu_to_le32(ns->ns_id),
 		.nvm_erase.blk_addr = cpu_to_le64(block_id),
 	};
 
-	return nvme_submit_sync_cmd(q, &c, NULL, 0);
+	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
 static struct nvm_dev_ops nvme_nvm_dev_ops = {
