@@ -148,6 +148,36 @@ static inline void _nvme_nvm_check_size(void)
 	BUILD_BUG_ON(sizeof(struct nvme_nvm_erase_blk) != 64);
 }
 
+struct nvme_nvm_id_chnl {
+	__le64			laddr_begin;
+	__le64			laddr_end;
+	__le32			oob_size;
+	__le32			queue_size;
+	__le32			gran_read;
+	__le32			gran_write;
+	__le32			gran_erase;
+	__le32			t_r;
+	__le32			t_sqr;
+	__le32			t_w;
+	__le32			t_sqw;
+	__le32			t_e;
+	__le16			chnl_parallelism;
+	__u8			io_sched;
+	__u8			reserved[133];
+} __attribute__((packed));
+
+struct nvme_nvm_id {
+	__u8			ver_id;
+	__u8			nvm_type;
+	__le16			nchannels;
+	__u8			reserved[252];
+	struct nvme_nvm_id_chnl	chnls[];
+} __attribute__((packed));
+
+#define NVME_NVM_CHNLS_PR_REQ ((4096U - sizeof(struct nvme_nvm_id)) \
+					/ sizeof(struct nvme_nvm_id_chnl))
+
+
 static int init_chnls(struct request_queue *q, struct nvm_id *nvm_id,
 						struct nvme_nvm_id *nvme_nvm_id)
 {
