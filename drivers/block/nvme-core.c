@@ -622,6 +622,9 @@ static void req_completion(struct nvme_queue *nvmeq, void *ctx,
 	if (req->cmd_type == REQ_TYPE_DRV_PRIV) {
 		u32 result = le32_to_cpup(&cqe->result);
 		req->sense = (void *)(uintptr_t)result;
+
+		if (blk_rq_pos(req) != (sector_t) -1)
+			nvm_unprep_rq(req, &iod->nvmrq);
 	}
 
 	if (cmd_rq->aborted)
@@ -640,8 +643,6 @@ static void req_completion(struct nvme_queue *nvmeq, void *ctx,
 		}
 	}
 	nvme_free_iod(nvmeq->dev, iod);
-
-	nvm_unprep_rq(req, &iod->nvmrq);
 
 	blk_mq_complete_request(req);
 }
@@ -731,14 +732,15 @@ static void nvme_submit_priv(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 {
 	struct nvme_command *cmnd = &nvmeq->sq_cmds[nvmeq->sq_tail];
 
-	memcpy(cmnd, req->cmd, sizeof(struct nvme_command));
+	if (ns && ns->type == NVME_NS_NVM && req->special)
+		nvme_nvm_rqtocmd(req, ns, cmnd, iod);
+	else
+		memcpy(cmnd, req->cmd, sizeof(struct nvme_command));
+
 	cmnd->rw.command_id = req->tag;
 	if (req->nr_phys_segments) {
 		cmnd->rw.prp1 = cpu_to_le64(sg_dma_address(iod->sg));
 		cmnd->rw.prp2 = cpu_to_le64(iod->first_dma);
-
-		if (ns && ns->type == NVME_NS_NVM)
-			nvme_nvm_prep_internal_rq(req, ns, cmnd, iod);
 	}
 
 	if (++nvmeq->sq_tail == nvmeq->q_depth)
@@ -788,46 +790,6 @@ static void nvme_submit_flush(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 	if (++nvmeq->sq_tail == nvmeq->q_depth)
 		nvmeq->sq_tail = 0;
 	writel(nvmeq->sq_tail, nvmeq->q_db);
-}
-
-static int nvme_nvm_submit_iod(struct nvme_queue *nvmeq, struct nvme_iod *iod,
-							struct nvme_ns *ns)
-{
-#ifdef CONFIG_NVM
-	struct request *req = iod_get_private(iod);
-	struct nvme_command *cmnd;
-	u16 control = 0;
-	u32 dsmgmt = 0;
-
-	if (req->cmd_flags & REQ_FUA)
-		control |= NVME_RW_FUA;
-	if (req->cmd_flags & (REQ_FAILFAST_DEV | REQ_RAHEAD))
-		control |= NVME_RW_LR;
-
-	cmnd = &nvmeq->sq_cmds[nvmeq->sq_tail];
-	memset(cmnd, 0, sizeof(*cmnd));
-
-	cmnd->nvm_hb_rw.opcode = (rq_data_dir(req) ?
-				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
-	cmnd->nvm_hb_rw.command_id = req->tag;
-	cmnd->nvm_hb_rw.nsid = cpu_to_le32(ns->ns_id);
-	cmnd->nvm_hb_rw.prp1 = cpu_to_le64(sg_dma_address(iod->sg));
-	cmnd->nvm_hb_rw.prp2 = cpu_to_le64(iod->first_dma);
-	cmnd->nvm_hb_rw.slba = cpu_to_le64(nvme_block_nr(ns, blk_rq_pos(req)));
-	cmnd->nvm_hb_rw.length = cpu_to_le16(
-			(blk_rq_bytes(req) >> ns->lba_shift) - 1);
-	cmnd->nvm_hb_rw.control = cpu_to_le16(control);
-	cmnd->nvm_hb_rw.dsmgmt = cpu_to_le32(dsmgmt);
-	cmnd->nvm_hb_rw.phys_addr =
-			cpu_to_le64(nvme_block_nr(ns,
-						iod->nvmrq.phys_sector));
-
-	if (++nvmeq->sq_tail == nvmeq->q_depth)
-		nvmeq->sq_tail = 0;
-	writel(nvmeq->sq_tail, nvmeq->q_db);
-#endif /* CONFIG_NVM */
-
-	return 0;
 }
 
 static int nvme_submit_iod(struct nvme_queue *nvmeq, struct nvme_iod *iod,
@@ -984,8 +946,6 @@ static int nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 		nvme_submit_discard(nvmeq, ns, req, iod);
 	else if (req->cmd_flags & REQ_FLUSH)
 		nvme_submit_flush(nvmeq, ns, req->tag);
-	else if (ns && ns->type == NVME_NS_NVM)
-		nvme_nvm_submit_iod(nvmeq, iod, ns);
 	else
 		nvme_submit_iod(nvmeq, iod, ns);
 
@@ -994,7 +954,7 @@ static int nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 	return BLK_MQ_RQ_QUEUE_OK;
 
  done_cmd:
-	nvme_free_iod(nvmeq->dev, iod);
+	nvme_free_iod(dev, iod);
 	return BLK_MQ_RQ_QUEUE_OK;
  error_cmd:
 	nvme_free_iod(dev, iod);
@@ -2043,11 +2003,6 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 								!ns->ext)
 		nvme_init_integrity(ns);
 
-	if (id->ncap == 0 || (ns->ms && !blk_get_integrity(disk)))
-		set_capacity(disk, 0);
-	else
-		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
-
 	if (dev->oncs & NVME_CTRL_ONCS_DSM)
 		nvme_config_discard(ns);
 
@@ -2059,6 +2014,11 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 				    "%s: LightNVM init failure\n", __func__);
 		ns->type = NVME_NS_NVM;
 	}
+
+	if (id->ncap == 0 || (ns->ms && !blk_get_integrity(disk)) || (ns->type == NVME_NS_NVM))
+		set_capacity(disk, 0);
+	else
+		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
 
 	kfree(id);
 	return ret;

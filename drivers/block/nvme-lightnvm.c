@@ -244,40 +244,45 @@ out:
 	return ret;
 }
 
-int nvme_nvm_prep_internal_rq(struct request *rq, struct nvme_ns *ns,
+void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 				struct nvme_command *c, struct nvme_iod *iod)
 {
 	struct nvm_rq *rqdata = &iod->nvmrq;
-	struct nvm_internal_cmd *cmd = rq->special;
 
-	if (!cmd)
-		return 0;
-
-	if (nvm_prep_rq(rq, rqdata))
-		dev_err(ns->dev->dev, "lightnvm: internal cmd failed\n");
-
+	c->nvm_hb_rw.opcode = (rq_data_dir(rq) ?
+				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
+	c->nvm_hb_rw.nsid = cpu_to_le32(ns->ns_id);
+	c->nvm_hb_rw.slba = cpu_to_le64(nvme_block_nr(ns, blk_rq_pos(rq)));
 	c->nvm_hb_rw.length = cpu_to_le16(
 			(blk_rq_bytes(rq) >> ns->lba_shift) - 1);
-	c->nvm_hb_rw.nsid = cpu_to_le32(ns->ns_id);
-	c->nvm_hb_rw.slba = cpu_to_le64(cmd->phys_lba);
 	c->nvm_hb_rw.phys_addr =
 		cpu_to_le64(nvme_block_nr(ns, rqdata->phys_sector));
-
-	return 0;
 }
 
-static int nvme_nvm_internal_rw(struct request_queue *q,
-						struct nvm_internal_cmd *cmd)
+static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
+			struct nvm_target_instance *ins, unsigned long flags)
 {
-	struct nvme_command c;
+	struct request *rq;
 
-	memset(&c, 0, sizeof(c));
+	rq = blk_mq_alloc_request(q, bio_rw(bio), GFP_KERNEL, 0);
+	if (IS_ERR(rq))
+		return -ENOMEM;
 
-	c.nvm_hb_rw.opcode = (cmd->rw ?
-				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
+	rq->cmd_type = REQ_TYPE_DRV_PRIV;
+	rq->__sector = bio->bi_iter.bi_sector;
+	rq->ioprio = bio_prio(bio);
 
-	return __nvme_submit_sync_cmd(q, &c, cmd->buffer, NULL,
-						cmd->bufflen, NULL, 30, cmd);
+	if (bio_has_data(bio))
+		rq->nr_phys_segments = bio_phys_segments(q, bio);
+
+	rq->__data_len = bio->bi_iter.bi_size;
+	rq->bio = rq->biotail = bio;
+	rq->special = ins;
+	rq->cmd = (char *)flags;
+
+	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
+
+	return 0;
 }
 
 static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
@@ -294,12 +299,16 @@ static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
 
 static struct nvm_dev_ops nvme_nvm_dev_ops = {
 	.identify		= nvme_nvm_identify,
+
 	.get_features		= nvme_nvm_get_features,
 	.set_responsibility	= nvme_nvm_set_resp,
+
 	.get_l2p_tbl		= nvme_nvm_get_l2p_tbl,
+
 	.set_bb_tbl		= nvme_nvm_set_bb_tbl,
 	.get_bb_tbl		= nvme_nvm_get_bb_tbl,
-	.internal_rw		= nvme_nvm_internal_rw,
+
+	.submit_io		= nvme_nvm_submit_io,
 	.erase_block		= nvme_nvm_erase_block,
 };
 
@@ -307,7 +316,7 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 static struct nvm_dev_ops nvme_nvm_dev_ops;
 static nvm_data_rq;
 
-void nvme_nvm_prep_internal_rq(struct request *rq, struct nvme_ns *ns,
+void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 			struct nvme_command *c, struct nvme_iod *iod)
 {
 }
