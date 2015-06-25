@@ -451,10 +451,7 @@ struct nvm_addr *nvm_update_map(struct rrpc *rrpc, sector_t l_addr,
 	struct nvm_addr *gp;
 	struct nvm_rev_addr *rev;
 
-	if (l_addr >= rrpc->nr_pages) {
-		printk("\n\n%llu %llu\n\n\n", l_addr, rrpc->nr_pages);
-		BUG();
-	}
+	BUG_ON(l_addr >= rrpc->nr_pages);
 
 	gp = &rrpc->trans_map[l_addr];
 	spin_lock(&rrpc->rev_lock);
