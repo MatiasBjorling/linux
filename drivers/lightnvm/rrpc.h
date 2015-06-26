@@ -164,6 +164,11 @@ static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
 	return &n->inflight_rq;
 }
 
+static inline struct rrpc *get_rrpc_from_rq(struct request *rq)
+{
+	return rq->sense;
+}
+
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq,
 							struct nvm_rq *rqdata)
 {
@@ -171,7 +176,7 @@ static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq,
 	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
-	if (rq->special)
+	if (get_rrpc_from_rq(rq))
 		return 0;
 
 	return rrpc_lock_laddr(rrpc, laddr, pages, r);
@@ -196,7 +201,7 @@ static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct request *rq,
 	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
-	if (rq->special)
+	if (get_rrpc_from_rq(rq))
 		return;
 
 	BUG_ON((laddr + pages) > rrpc->nr_pages);

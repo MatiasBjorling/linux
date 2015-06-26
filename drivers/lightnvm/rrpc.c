@@ -188,7 +188,7 @@ static int rrpc_move_valid_pages(struct rrpc *rrpc, struct nvm_block *block)
 	struct bio *bio;
 	struct page *page;
 	int slot;
-	sector_t phys_addr, what;
+	sector_t phys_addr;
 	DECLARE_COMPLETION_ONSTACK(wait);
 
 	if (bitmap_full(block->invalid_pages, lun->nr_pages_per_blk))
@@ -230,7 +230,6 @@ try:
 
 		/* Perform read to do GC */
 		bio->bi_iter.bi_sector = nvm_get_sector(rev->addr);
-		what = rev->addr;
 		bio->bi_rw = READ;
 		bio->bi_private = &wait;
 		bio->bi_end_io = rrpc_end_sync_bio;
