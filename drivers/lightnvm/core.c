@@ -562,6 +562,9 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	tdisk->private_data = targetdata;
 	tqueue->queuedata = targetdata;
 
+	/* does not yet support multi-page IOs. */
+	blk_queue_max_hw_sectors(tqueue, 8);
+
 	set_capacity(tdisk, tt->capacity(targetdata));
 	add_disk(tdisk);
 
@@ -730,9 +733,6 @@ int nvm_register(struct request_queue *q, struct gendisk *disk,
 
 	if (!ops->identify || !ops->get_features)
 		return -EINVAL;
-
-	/* does not yet support multi-page IOs. */
-	blk_queue_max_hw_sectors(q, queue_logical_block_size(q) >> 9);
 
 	nvm = kzalloc(sizeof(struct nvm_dev), GFP_KERNEL);
 	if (!nvm)

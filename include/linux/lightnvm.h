@@ -214,7 +214,6 @@ typedef int (nvm_tgt_prep_rq)(struct request *, struct nvm_rq *, void *);
 typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq *,
 									void *);
 typedef sector_t (nvm_tgt_capacity)(void *);
-typedef struct nvm_rq *(nvm_tgt_get_per_nvmrq_fn)(struct request *);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
 
@@ -227,9 +226,6 @@ struct nvm_target_type {
 	nvm_tgt_prep_rq *prep_rq;
 	nvm_tgt_unprep_rq *unprep_rq;
 	nvm_tgt_capacity *capacity;
-
-	/* callbacks for lightnvm to device driver */
-	nvm_tgt_get_per_nvmrq_fn *get_per_nvmrq;
 
 	/* module-specific init/teardown */
 	nvm_tgt_init_fn *init;
