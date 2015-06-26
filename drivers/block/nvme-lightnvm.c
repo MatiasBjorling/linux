@@ -434,7 +434,7 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
-	rq->special = ins;
+	rq->sense = ins;
 	rq->cmd = (char *)flags;
 
 	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);

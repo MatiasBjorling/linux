@@ -727,7 +727,7 @@ static void nvme_submit_priv(struct nvme_queue *nvmeq, struct nvme_ns *ns,
 {
 	struct nvme_command *cmnd = &nvmeq->sq_cmds[nvmeq->sq_tail];
 
-	if (ns && ns->type == NVME_NS_NVM && req->special)
+	if (ns && ns->type == NVME_NS_NVM && req->sense)
 		nvme_nvm_rqtocmd(req, ns, cmnd, iod);
 	else
 		memcpy(cmnd, req->cmd, sizeof(struct nvme_command));
