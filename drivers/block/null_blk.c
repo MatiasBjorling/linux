@@ -512,6 +512,8 @@ static void null_del_dev(struct nullb *nullb)
 	blk_cleanup_queue(nullb->q);
 	if (queue_mode == NULL_Q_MQ)
 		blk_mq_free_tag_set(&nullb->tag_set);
+	if (nvm_enable)
+		nvm_unregister(nullb->disk);
 	put_disk(nullb->disk);
 	kfree(nullb);
 }
