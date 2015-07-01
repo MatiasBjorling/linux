@@ -2009,7 +2009,8 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 		ns->type = NVME_NS_NVM;
 	}
 
-	if (id->ncap == 0 || (ns->ms && !blk_get_integrity(disk)) || (ns->type == NVME_NS_NVM))
+	if (id->ncap == 0 || (ns->ms && !blk_get_integrity(disk)) ||
+						(ns->type == NVME_NS_NVM))
 		set_capacity(disk, 0);
 	else
 		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
