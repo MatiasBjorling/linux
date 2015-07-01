@@ -2680,6 +2680,9 @@ static void nvme_free_namespaces(struct nvme_dev *dev)
 	list_for_each_entry_safe(ns, next, &dev->namespaces, list) {
 		list_del(&ns->list);
 
+		if (ns->type == NVME_NS_NVM)
+			nvm_unregister(ns->disk);
+
 		spin_lock(&dev_list_lock);
 		ns->disk->private_data = NULL;
 		spin_unlock(&dev_list_lock);
