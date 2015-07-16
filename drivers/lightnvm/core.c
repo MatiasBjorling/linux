@@ -30,6 +30,7 @@
 #include <linux/lightnvm.h>
 
 static LIST_HEAD(_targets);
+static LIST_HEAD(_bms);
 static DECLARE_RWSEM(_lock);
 
 struct nvm_target_type *nvm_find_target_type(const char *name)
@@ -69,15 +70,42 @@ void nvm_unregister_target(struct nvm_target_type *tt)
 }
 EXPORT_SYMBOL(nvm_unregister_target);
 
-static void nvm_reset_block(struct nvm_lun *lun, struct nvm_block *block)
+struct nvm_bm_type *nvm_find_bm_type(const char *name)
 {
-	spin_lock(&block->lock);
-	bitmap_zero(block->invalid_pages, lun->nr_pages_per_blk);
-	block->next_page = 0;
-	block->nr_invalid_pages = 0;
-	atomic_set(&block->data_cmnt_size, 0);
-	spin_unlock(&block->lock);
+	struct nvm_bm_type *bt;
+
+	list_for_each_entry(bt, &_bms, list)
+		if (!strcmp(name, bt->name))
+			return bt;
+
+	return NULL;
 }
+
+int nvm_register_bm(struct nvm_bm_type *bt)
+{
+	int ret = 0;
+
+	down_write(&_lock);
+	if (nvm_find_bm_type(bt->name))
+		ret = -EEXIST;
+	else
+		list_add(&bt->list, &_bms);
+	up_write(&_lock);
+
+	return ret;
+}
+EXPORT_SYMBOL(nvm_register_bm);
+
+void nvm_unregister_bm(struct nvm_bm_type *bt)
+{
+	if (!bt)
+		return;
+
+	down_write(&_lock);
+	list_del(&bt->list);
+	up_write(&_lock);
+}
+EXPORT_SYMBOL(nvm_unregister_bm);
 
 /* use nvm_lun_[get/put]_block to administer the blocks in use for each lun.
  * Whenever a block is in used by an append point, we store it within the
@@ -88,37 +116,10 @@ static void nvm_reset_block(struct nvm_lun *lun, struct nvm_block *block)
  * assume that the start of used list is the oldest block, and therefore
  * more likely to contain invalidated pages.
  */
-struct nvm_block *nvm_get_blk(struct nvm_lun *lun, int is_gc)
+struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
+							unsigned long flags)
 {
-	struct nvm_block *block = NULL;
-
-	BUG_ON(!lun);
-
-	spin_lock(&lun->lock);
-
-	if (list_empty(&lun->free_list)) {
-		pr_err_ratelimited("nvm: lun %u have no free pages available",
-								lun->id);
-		spin_unlock(&lun->lock);
-		goto out;
-	}
-
-	while (!is_gc && lun->nr_free_blocks < lun->reserved_blocks) {
-		spin_unlock(&lun->lock);
-		goto out;
-	}
-
-	block = list_first_entry(&lun->free_list, struct nvm_block, list);
-	list_move_tail(&block->list, &lun->used_list);
-
-	lun->nr_free_blocks--;
-
-	spin_unlock(&lun->lock);
-
-	nvm_reset_block(lun, block);
-
-out:
-	return block;
+	return dev->bm->get_blk(dev, lun, flags);
 }
 EXPORT_SYMBOL(nvm_get_blk);
 
@@ -126,16 +127,9 @@ EXPORT_SYMBOL(nvm_get_blk);
  * free list. We add it last to allow round-robin use of all pages. Thereby
  * provide simple (naive) wear-leveling.
  */
-void nvm_put_blk(struct nvm_block *block)
+void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	struct nvm_lun *lun = block->lun;
-
-	spin_lock(&lun->lock);
-
-	list_move_tail(&block->list, &lun->free_list);
-	lun->nr_free_blocks++;
-
-	spin_unlock(&lun->lock);
+	return dev->bm->put_blk(dev, blk);
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
@@ -156,212 +150,19 @@ out:
 }
 EXPORT_SYMBOL(nvm_alloc_addr);
 
-int nvm_submit_io(struct nvm_dev *dev, struct bio *bio,
+int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_ppalist *ppa,
 			struct nvm_target_instance *ins, unsigned long flags)
 {
-	if (!dev->ops->submit_io)
-		return 0;
-
-	return dev->ops->submit_io(dev->q, bio, ins, flags);
+	return dev->bm->submit_io(dev, bio, ppa, ins, flags);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
 /* Send erase command to device */
-int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *block)
+int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	if (!dev->ops->erase_block)
-		return 0;
-
-	return dev->ops->erase_block(dev->q, block->id);
+	return dev->bm->erase_blk(dev, blk);
 }
 EXPORT_SYMBOL(nvm_erase_blk);
-
-static void nvm_blocks_free(struct nvm_dev *dev)
-{
-	struct nvm_lun *lun;
-	int i;
-
-	nvm_for_each_lun(dev, lun, i) {
-		if (!lun->blocks)
-			break;
-		vfree(lun->blocks);
-	}
-}
-
-static void nvm_luns_free(struct nvm_dev *dev)
-{
-	kfree(dev->luns);
-}
-
-static int nvm_luns_init(struct nvm_dev *dev)
-{
-	struct nvm_lun *lun;
-	struct nvm_id_chnl *chnl;
-	int i;
-
-	dev->luns = kcalloc(dev->nr_luns, sizeof(struct nvm_lun), GFP_KERNEL);
-	if (!dev->luns)
-		return -ENOMEM;
-
-	nvm_for_each_lun(dev, lun, i) {
-		chnl = &dev->identity.chnls[i];
-		pr_info("nvm: p %u qsize %u gr %u ge %u begin %llu end %llu\n",
-			i, chnl->queue_size, chnl->gran_read, chnl->gran_erase,
-			chnl->laddr_begin, chnl->laddr_end);
-
-		spin_lock_init(&lun->lock);
-
-		INIT_LIST_HEAD(&lun->free_list);
-		INIT_LIST_HEAD(&lun->used_list);
-		INIT_LIST_HEAD(&lun->bb_list);
-
-		lun->id = i;
-		lun->dev = dev;
-		lun->chnl = chnl;
-		lun->reserved_blocks = 2; /* for GC only */
-		lun->nr_blocks =
-				(chnl->laddr_end - chnl->laddr_begin + 1) /
-				(chnl->gran_erase / chnl->gran_read);
-		lun->nr_free_blocks = lun->nr_blocks;
-		lun->nr_pages_per_blk = chnl->gran_erase / chnl->gran_write *
-					(chnl->gran_write / dev->sector_size);
-
-		dev->total_pages += lun->nr_blocks * lun->nr_pages_per_blk;
-		dev->total_blocks += lun->nr_blocks;
-
-		if (lun->nr_pages_per_blk >
-				MAX_INVALID_PAGES_STORAGE * BITS_PER_LONG) {
-			pr_err("nvm: number of pages per block too high.");
-			return -EINVAL;
-		}
-	}
-
-	return 0;
-}
-
-static int nvm_block_bb(u32 lun_id, void *bb_bitmap, unsigned int nr_blocks,
-								void *private)
-{
-	struct nvm_dev *dev = private;
-	struct nvm_lun *lun = &dev->luns[lun_id];
-	struct nvm_block *block;
-	int i;
-
-	if (unlikely(bitmap_empty(bb_bitmap, nr_blocks)))
-		return 0;
-
-	i = -1;
-	while ((i = find_next_bit(bb_bitmap, nr_blocks, i + 1)) <
-			nr_blocks) {
-		block = &lun->blocks[i];
-		if (!block) {
-			pr_err("nvm: BB data is out of bounds!\n");
-			return -EINVAL;
-		}
-		list_move_tail(&block->list, &lun->bb_list);
-	}
-
-	return 0;
-}
-
-static int nvm_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
-{
-	struct nvm_dev *dev = private;
-	sector_t max_pages = dev->total_pages * (dev->sector_size >> 9);
-	u64 elba = slba + nlb;
-	struct nvm_lun *lun;
-	struct nvm_block *blk;
-	sector_t total_pgs_per_lun = /* each lun have the same configuration */
-		   dev->luns[0].nr_blocks * dev->luns[0].nr_pages_per_blk;
-	u64 i;
-	int lun_id;
-
-	if (unlikely(elba > dev->total_pages)) {
-		pr_err("nvm: L2P data from device is out of bounds!\n");
-		return -EINVAL;
-	}
-
-	for (i = 0; i < nlb; i++) {
-		u64 pba = le64_to_cpu(entries[i]);
-
-		if (unlikely(pba >= max_pages && pba != U64_MAX)) {
-			pr_err("nvm: L2P data entry is out of bounds!\n");
-			return -EINVAL;
-		}
-
-		/* Address zero is a special one. The first page on a disk is
-		 * protected. As it often holds internal device boot
-		 * information. */
-		if (!pba)
-			continue;
-
-		/* resolve block from physical address */
-		lun_id = pba / total_pgs_per_lun;
-		lun = &dev->luns[lun_id];
-
-		/* Calculate block offset into lun */
-		pba = pba - (total_pgs_per_lun * lun_id);
-		blk = &lun->blocks[pba / lun->nr_pages_per_blk];
-
-		if (!blk->type) {
-			/* at this point, we don't know anything about the
-			 * block. It's up to the FTL on top to re-etablish the
-			 * block state */
-			list_move_tail(&blk->list, &lun->used_list);
-			blk->type = 1;
-			lun->nr_free_blocks--;
-		}
-	}
-
-	return 0;
-}
-
-static int nvm_blocks_init(struct nvm_dev *dev)
-{
-	struct nvm_lun *lun;
-	struct nvm_block *block;
-	sector_t lun_iter, block_iter, cur_block_id = 0;
-	int ret;
-
-	nvm_for_each_lun(dev, lun, lun_iter) {
-		lun->blocks = vzalloc(sizeof(struct nvm_block) *
-						lun->nr_blocks);
-		if (!lun->blocks)
-			return -ENOMEM;
-
-		lun_for_each_block(lun, block, block_iter) {
-			spin_lock_init(&block->lock);
-			INIT_LIST_HEAD(&block->list);
-
-			block->lun = lun;
-			block->id = cur_block_id++;
-
-			/* First block is reserved for device */
-			if (unlikely(lun_iter == 0 && block_iter == 0))
-				continue;
-
-			list_add_tail(&block->list, &lun->free_list);
-		}
-
-		if (dev->ops->get_bb_tbl) {
-			ret = dev->ops->get_bb_tbl(dev->q, lun->id,
-			lun->nr_blocks, nvm_block_bb, dev);
-			if (ret)
-				pr_err("nvm: could not read BB table\n");
-		}
-	}
-
-	if (dev->ops->get_l2p_tbl) {
-		ret = dev->ops->get_l2p_tbl(dev->q, 0, dev->total_pages,
-							nvm_block_map, dev);
-		if (ret) {
-			pr_err("nvm: could not read L2P table.\n");
-			pr_warn("nvm: default block initialization");
-		}
-	}
-
-	return 0;
-}
 
 static void nvm_core_free(struct nvm_dev *dev)
 {
@@ -383,8 +184,9 @@ static void nvm_free(struct nvm_dev *dev)
 	if (!dev)
 		return;
 
-	nvm_blocks_free(dev);
-	nvm_luns_free(dev);
+	if (dev->bm)
+		dev->bm->unregister_bm(dev);
+
 	nvm_core_free(dev);
 }
 
@@ -397,10 +199,7 @@ int nvm_validate_features(struct nvm_dev *dev)
 	if (ret)
 		return ret;
 
-	/* Only default configuration is supported.
-	 * I.e. L2P, No ondrive GC and drive performs ECC */
-	if (gf.rsp != 0x0 || gf.ext != 0x0)
-		return -EINVAL;
+	dev->features = gf;
 
 	return 0;
 }
@@ -415,6 +214,7 @@ int nvm_validate_responsibility(struct nvm_dev *dev)
 
 int nvm_init(struct nvm_dev *dev)
 {
+	struct nvm_bm_type *bt;
 	int ret = 0;
 
 	if (!dev->q || !dev->ops)
@@ -449,28 +249,29 @@ int nvm_init(struct nvm_dev *dev)
 		goto err;
 	}
 
-	ret = nvm_luns_init(dev);
-	if (ret) {
-		pr_err("nvm: could not initialize luns\n");
-		goto err;
-	}
-
 	if (!dev->nr_luns) {
 		pr_err("nvm: device did not expose any luns.\n");
 		goto err;
 	}
 
-	ret = nvm_blocks_init(dev);
-	if (ret) {
-		pr_err("nvm: could not initialize blocks\n");
-		goto err;
+	/* register with device with a supported BM */
+	list_for_each_entry(bt, &_bms, list) {
+		ret = bt->register_bm(dev);
+		if (ret < 0)
+			goto err; /* initialization failed */
+		if (ret > 0) {
+			dev->bm = bt;
+			break; /* successfully initialized */
+		}
 	}
 
-	pr_info("nvm: allocating %lu physical pages (%lu KB)\n",
-		dev->total_pages, dev->total_pages * dev->sector_size / 1024);
-	pr_info("nvm: luns: %u\n", dev->nr_luns);
-	pr_info("nvm: blocks: %lu\n", dev->total_blocks);
-	pr_info("nvm: target sector size=%d\n", dev->sector_size);
+	if (!ret) {
+		pr_info("nvm: no compatible bm was found.\n");
+		return 0;
+	}
+
+	pr_info("nvm: luns: %u blocks: %lu sector size: %d configured\n",
+			dev->nr_luns, dev->total_blocks, dev->sector_size);
 
 	return 0;
 err:
@@ -603,19 +404,15 @@ static void nvm_remove_target(struct nvm_target *t)
 	kfree(t);
 }
 
-
 static ssize_t free_blocks_show(struct device *d, struct device_attribute *attr,
 		char *page)
 {
 	struct gendisk *disk = dev_to_disk(d);
 	struct nvm_dev *dev = disk->nvm;
-
 	char *page_start = page;
-	struct nvm_lun *lun;
-	unsigned int i;
 
-	nvm_for_each_lun(dev, lun, i)
-		page += sprintf(page, "%8u\t%u\n", i, lun->nr_free_blocks);
+	if (dev->bm)
+		dev->bm->free_blocks_print(dev, page);
 
 	return page - page_start;
 }
@@ -632,6 +429,11 @@ static ssize_t configure_store(struct device *d, struct device_attribute *attr,
 
 	if (cnt >= 255)
 		return -EINVAL;
+
+	if (!dev->bm) {
+		pr_err("nvm: no bm backend configured for this device.\n");
+		return -EINVAL;
+	}
 
 	ret = sscanf(buf, "%s %s %u:%u", name, ttname, &lun_begin, &lun_end);
 	if (ret != 4) {

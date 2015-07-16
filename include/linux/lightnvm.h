@@ -16,12 +16,13 @@ enum {
 
 #include <linux/blkdev.h>
 #include <linux/types.h>
+#include <linux/file.h>
 
 enum {
 	/* HW Responsibilities */
-	NVM_RSP_L2P	= 0x00,
-	NVM_RSP_GC	= 0x01,
-	NVM_RSP_ECC	= 0x02,
+	NVM_RSP_L2P	= 1 << 0,
+	NVM_RSP_GC	= 1 << 1,
+	NVM_RSP_ECC	= 1 << 2,
 
 	/* Physical NVM Type */
 	NVM_NVMT_BLK	= 0,
@@ -76,6 +77,12 @@ struct nvm_target_instance {
 	struct nvm_target_type *tt;
 };
 
+struct nvm_ppalist {
+	uint64_t ppa[64];
+};
+
+struct nvm_block;
+
 extern void nvm_unregister(struct gendisk *);
 extern int nvm_attach_sysfs(struct gendisk *disk);
 
@@ -90,6 +97,7 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
+			struct nvm_ppalist *ppa,
 			struct nvm_target_instance *, unsigned long flags);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
@@ -104,8 +112,6 @@ struct nvm_dev_ops {
 	nvm_submit_io_fn	*submit_io;
 	nvm_erase_blk_fn	*erase_block;
 };
-
-struct nvm_blocks;
 
 /*
  * We assume that the device exposes its channels as a linear address
@@ -166,21 +172,22 @@ struct nvm_dev {
 	struct nvm_dev_ops *ops;
 	struct request_queue *q;
 
-	struct nvm_id identity;
-
 	struct list_head online_targets;
 
-	int nr_luns;
-	struct nvm_lun *luns;
+	struct nvm_bm_type *bm;
+	void *bmp;
 
-	/*int nr_blks_per_lun;
-	int nr_pages_per_blk;*/
-	/* Calculated/Cached values. These do not reflect the actual usuable
+	int nr_luns;
+
+	/* Calculated/Cached values. These do not reflect the actual usable
 	 * blocks at run-time. */
 	unsigned long total_pages;
 	unsigned long total_blocks;
 
 	uint32_t sector_size;
+
+	struct nvm_id identity;
+	struct nvm_get_features features;
 };
 
 /* Logical to physical mapping */
@@ -231,32 +238,78 @@ struct nvm_target_type {
 	nvm_tgt_init_fn *init;
 	nvm_tgt_exit_fn *exit;
 
-	/* For open-channel SSD internal use */
+	/* For internal use */
 	struct list_head list;
 };
 
-extern struct nvm_target_type *nvm_find_target_type(const char *);
 extern int nvm_register_target(struct nvm_target_type *);
 extern void nvm_unregister_target(struct nvm_target_type *);
+
+typedef int (nvm_bm_register_fn)(struct nvm_dev *);
+typedef void (nvm_bm_unregister_fn)(struct nvm_dev *);
+typedef struct nvm_block *(nvm_bm_get_blk_fn)(struct nvm_dev *,
+					      struct nvm_lun *, unsigned long);
+typedef void (nvm_bm_put_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct bio *,
+	     struct nvm_ppalist *, struct nvm_target_instance *, unsigned long);
+typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
+	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
+typedef int (nvm_bm_save_state_fn)(struct file *);
+typedef int (nvm_bm_restore_state_fn)(struct file *);
+typedef void (nvm_bm_free_blocks_print_fn)(struct nvm_dev *, char *);
+
+struct nvm_bm_type {
+	const char *name;
+	unsigned int version[3];
+
+	nvm_bm_register_fn *register_bm;
+	nvm_bm_unregister_fn *unregister_bm;
+
+	/* Block administration callbacks */
+	nvm_bm_get_blk_fn *get_blk;
+	nvm_bm_put_blk_fn *put_blk;
+	nvm_bm_open_blk_fn *open_blk;
+	nvm_bm_close_blk_fn *close_blk;
+	nvm_bm_flush_blk_fn *flush_blk;
+
+	nvm_bm_submit_io_fn *submit_io;
+	nvm_bm_erase_blk_fn *erase_blk;
+
+	/* State management for debugging purposes */
+	nvm_bm_save_state_fn *save_state;
+	nvm_bm_restore_state_fn *restore_state;
+
+	/* Statistics */
+	nvm_bm_free_blocks_print_fn *free_blocks_print;
+	struct list_head list;
+};
+
+extern int nvm_register_bm(struct nvm_bm_type *);
+extern void nvm_unregister_bm(struct nvm_bm_type *);
+
+extern struct nvm_block *nvm_get_blk(struct nvm_dev *, struct nvm_lun *,
+								unsigned long);
+extern void nvm_put_blk(struct nvm_dev *, struct nvm_block *);
+extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
+
 extern int nvm_register(struct request_queue *, struct gendisk *,
 							struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
-extern int nvm_submit_io(struct nvm_dev *, struct bio *,
+
+extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_ppalist *,
 			struct nvm_target_instance *, unsigned long flags);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
-extern struct nvm_block *nvm_get_blk(struct nvm_lun *, int);
-extern void nvm_put_blk(struct nvm_block *block);
-extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
+
 extern sector_t nvm_alloc_addr(struct nvm_block *);
 static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
 {
 	return disk->nvm;
 }
-
-#define nvm_for_each_lun(dev, lun, i) \
-		for ((i) = 0, lun = &(dev)->luns[0]; \
-			(i) < (dev)->nr_luns; (i)++, lun = &(dev)->luns[(i)])
 
 #define lun_for_each_block(p, b, i) \
 		for ((i) = 0, b = &(p)->blocks[0]; \
@@ -292,12 +345,6 @@ static inline sector_t block_to_addr(struct nvm_block *block)
 	struct nvm_lun *lun = block->lun;
 
 	return block->id * lun->nr_pages_per_blk;
-}
-
-static inline struct nvm_lun *paddr_to_lun(struct nvm_dev *dev,
-							sector_t p_addr)
-{
-	return &dev->luns[p_addr / (dev->total_pages / dev->nr_luns)];
 }
 
 static inline unsigned long nvm_get_rq_flags(struct request *rq)
@@ -343,11 +390,12 @@ static inline int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
 static inline void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
 {
 }
-static inline struct nvm_block *nvm_get_blk(struct nvm_lun *lun, int is_gc)
+static inline struct nvm_block *nvm_get_blk(struct nvm_dev *dev,
+				struct nvm_lun *lun, unsigned long flags)
 {
 	return NULL;
 }
-static inline void nvm_put_blk(struct nvm_block *blk) {}
+static inline void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk) {}
 static inline int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return -EINVAL;
