@@ -23,4 +23,11 @@ config NVM_RRPC
 	host. The target is implemented using a linear mapping table and
 	cost-based garbage collection. It is optimized for 4K IO sizes.
 
+config NVM_BM_HB
+	tristate "Block manager for Hybrid Open-Channel SSD"
+	---help---
+	Block manager for SSDs that offload block management off to the device,
+	while keeping data placement and garbage collection decisions on the
+	host.
+
 endif # NVM
