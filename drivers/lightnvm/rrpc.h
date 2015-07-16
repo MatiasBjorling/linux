@@ -222,8 +222,7 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 	spin_unlock_irqrestore(&map->lock, flags);
 }
 
-//TODO: JAVIER: Change name
-static inline void rrpc_unlock_rq2(struct rrpc *rrpc, struct request *rq,
+static inline void rrpc_unlock_rq_from_bio(struct rrpc *rrpc, struct request *rq,
 							struct nvm_rq *rqdata)
 {
 	sector_t laddr = blk_rq_pos(rq) / NR_PHY_IN_LOG;

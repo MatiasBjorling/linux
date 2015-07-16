@@ -557,7 +557,7 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 	int cmnt_size;
 
 	//TODO: JAVIER: Need to do this in a different way
-	rrpc_unlock_rq2(rrpc, rq, rqdata);
+	rrpc_unlock_rq_from_bio(rrpc, rq, rqdata);
 
 	if (rq_data_dir(rq) == WRITE) {
 		cmnt_size = atomic_inc_return(&block->data_cmnt_size);
