@@ -417,6 +417,7 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 }
 
 static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
+			struct nvm_ppalist *ppa,
 			struct nvm_target_instance *ins, unsigned long flags)
 {
 	struct request *rq;
