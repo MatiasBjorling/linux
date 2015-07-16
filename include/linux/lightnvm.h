@@ -97,8 +97,7 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
-			struct nvm_ppalist *ppa,
-			struct nvm_target_instance *, unsigned long flags);
+	struct nvm_rq *, struct nvm_target_instance *, unsigned long flags);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
 struct nvm_dev_ops {
@@ -208,16 +207,13 @@ struct rrpc_inflight_rq {
 };
 
 struct nvm_rq {
+	struct nvm_target_instance *ins;
 	sector_t phys_sector;
-
-	/* target specific */
-	struct rrpc_inflight_rq inflight_rq;
-	struct nvm_addr *addr;
-	unsigned int flags;
+	void *priv
 };
 
 typedef void (nvm_tgt_make_rq)(struct request_queue *, struct bio *);
-typedef int (nvm_tgt_prep_rq)(struct request *, struct nvm_rq *, void *);
+typedef int (nvm_tgt_prep_rq)(struct bio *, struct nvm_rq *, void *);
 typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq *,
 									void *);
 typedef sector_t (nvm_tgt_capacity)(void *);
@@ -300,7 +296,7 @@ extern int nvm_register(struct request_queue *, struct gendisk *,
 							struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
 
-extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_ppalist *,
+extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *rqdata,
 			struct nvm_target_instance *, unsigned long flags);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
