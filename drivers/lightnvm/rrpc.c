@@ -84,7 +84,7 @@ static struct nvm_rq *rrpc_inflight_laddr_acquire(struct rrpc *rrpc,
 
 	inf = rrpc_get_inflight_rq(rqdata);
 	if (rrpc_lock_laddr(rrpc, laddr, pages, inf)) {
-		kfree(rqdata);
+		mempool_free(rqdata, rrpc->rq_pool);
 		return NULL;
 	}
 
@@ -97,8 +97,8 @@ static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqdata
 
 	rrpc_unlock_laddr(rrpc, inf->l_start, inf);
 
-	kfree(rqdata->priv);
-	kfree(rqdata);
+	mempool_free(rqdata->priv, rrpc->t_rq_pool);
+	mempool_free(rqdata, rrpc->rq_pool);
 }
 
 static void rrpc_discard(struct rrpc *rrpc, struct bio *bio)
@@ -294,7 +294,7 @@ static void rrpc_block_gc(struct work_struct *work)
 		goto done;
 
 	nvm_erase_blk(dev, block);
-	nvm_put_blk(block);
+	nvm_put_blk(dev, block);
 done:
 	mempool_free(gcb, rrpc->gcb_pool);
 }
@@ -504,13 +504,14 @@ static struct nvm_addr *rrpc_map_page(struct rrpc *rrpc, sector_t laddr,
 	p_addr = nvm_alloc_addr(p_block);
 
 	if (p_addr == ADDR_EMPTY) {
-		p_block = nvm_get_blk(lun, 0);
+		p_block = nvm_get_blk(rrpc->q_nvm, lun, 0);
 
 		if (!p_block) {
 			if (is_gc) {
 				p_addr = nvm_alloc_addr(rlun->gc_cur);
 				if (p_addr == ADDR_EMPTY) {
-					p_block = nvm_get_blk(lun, 1);
+					p_block =
+					       nvm_get_blk(rrpc->q_nvm, lun, 1);
 					if (!p_block) {
 						pr_err("rrpc: no more blocks");
 						goto finished;
@@ -548,7 +549,7 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 								void *private)
 {
 	struct rrpc *rrpc = private;
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)rqdata->priv;
+	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)rqdata->priv;
 	struct nvm_addr *p = t_rqdata->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
@@ -566,7 +567,7 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 		gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
 		if (!gcb) {
 			pr_err("rrpc: not able to queue block for gc.");
-			goto free_rqdata;
+			goto free_rq_data_req;
 		}
 
 		gcb->rrpc = rrpc;
@@ -576,10 +577,9 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 		queue_work(rrpc->kgc_wq, &gcb->ws_gc);
 	}
 
+free_rq_data_req:
+	mempool_free(t_rqdata->req_rq, rrpc->requeue_pool);
 free_rqdata:
-	if (t_rqdata->req_rq) {
-		mempool_free(t_rqdata->req_rq, rrpc->requeue_pool);
-	}
 	if (t_rqdata)
 		mempool_free(t_rqdata, rrpc->t_rq_pool);
 	if (rqdata)
@@ -642,7 +642,8 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 static int rrpc_prep_rq(struct bio *bio, struct nvm_rq *rqdata,
 					void *private, unsigned long flags)
 {
-	struct rrpc *rrpc = (struct rrpc*)private;
+	struct rrpc *rrpc = private;
+
 	if (bio_rw(bio) == WRITE)
 		return rrpc_write_rq(rrpc, bio, rqdata, flags);
 
@@ -1119,14 +1120,14 @@ static int rrpc_luns_configure(struct rrpc *rrpc)
 	for (i = 0; i < rrpc->nr_luns; i++) {
 		rlun = &rrpc->luns[i];
 
-		blk = nvm_get_blk(rlun->parent, 0);
+		blk = nvm_get_blk(rrpc->q_nvm, rlun->parent, 0);
 		if (!blk)
 			return -EINVAL;
 
 		rrpc_set_lun_cur(rlun, blk);
 
 		/* Emergency gc block */
-		blk = nvm_get_blk(rlun->parent, 1);
+		blk = nvm_get_blk(rrpc->q_nvm, rlun->parent, 1);
 		if (!blk)
 			return -EINVAL;
 		rlun->gc_cur = blk;
@@ -1236,6 +1237,8 @@ static struct nvm_target_type tt_rrpc = {
 	.name		= "rrpc",
 
 	.make_rq	= rrpc_make_rq,
+
+	/* FIXME: Remove prep and unprep from here */
 	.prep_rq	= rrpc_prep_rq,
 	.unprep_rq	= rrpc_unprep_rq,
 

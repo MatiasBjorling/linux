@@ -134,12 +134,12 @@ struct rrpc_block_gc {
 
 static inline sector_t nvm_get_laddr(struct bio *bio)
 {
-	return bio_bi_pos(bio) / NR_PHY_IN_LOG;
+	return bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 }
 
 static inline unsigned int nvm_get_pages(struct bio *bio)
 {
-	return  bio_bi_bytes(bio) / EXPOSED_PAGE_SIZE;
+	return  bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
 }
 
 static inline sector_t nvm_get_sector(sector_t laddr)
