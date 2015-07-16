@@ -411,6 +411,7 @@ static int null_nvm_get_features(struct request_queue *q,
 }
 
 static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
+			struct nvm_ppalist *ppa,
 			struct nvm_target_instance *ins, unsigned long flags)
 {
 	struct request *rq;
