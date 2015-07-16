@@ -17,7 +17,7 @@ menuconfig NVM
 if NVM
 
 config NVM_RRPC
-	tristate "Round-robin Hybrid Open-Channel SSD"
+	tristate "Round-robin Hybrid Open-Channel SSD target"
 	---help---
 	Allows an open-channel SSD to be exposed as a block device to the
 	host. The target is implemented using a linear mapping table and
