@@ -33,9 +33,30 @@
 #define GC_LIMIT_INVERSE 10
 #define GC_TIME_SECS 100
 
+struct rrpc_requeue_rq {
+	struct rrpc *rrpc;
+	struct bio *bio;
+	struct nvm_rq *rqdata;
+	int flags;
+	struct list_head list;
+};
+
 struct nvm_inflight {
 	spinlock_t lock;
 	struct list_head reqs;
+};
+
+struct rrpc_inflight_rq {
+	struct list_head list;
+	sector_t l_start;
+	sector_t l_end;
+};
+
+struct rrpc_rq {
+	struct rrpc_inflight_rq inflight_rq;
+	struct rrpc_requeue_rq *req_rq;
+	struct nvm_addr *addr;
+	unsigned int flags;
 };
 
 struct rrpc_lun;
@@ -93,6 +114,9 @@ struct rrpc {
 	mempool_t *addr_pool;
 	mempool_t *page_pool;
 	mempool_t *gcb_pool;
+	mempool_t *t_rq_pool;
+	mempool_t *rq_pool;
+	mempool_t *requeue_pool;
 
 	struct timer_list gc_timer;
 	struct workqueue_struct *krqd_wq;
@@ -108,9 +132,14 @@ struct rrpc_block_gc {
 	struct work_struct ws_gc;
 };
 
-static inline sector_t nvm_get_laddr(struct request *rq)
+static inline sector_t nvm_get_laddr(struct bio *bio)
 {
-	return blk_rq_pos(rq) / NR_PHY_IN_LOG;
+	return bio_bi_pos(bio) / NR_PHY_IN_LOG;
+}
+
+static inline unsigned int nvm_get_pages(struct bio *bio)
+{
+	return  bio_bi_bytes(bio) / EXPOSED_PAGE_SIZE;
 }
 
 static inline sector_t nvm_get_sector(sector_t laddr)
@@ -161,23 +190,22 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 
 static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
 {
-	return &n->inflight_rq;
+	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)n->priv;
+	return &t_rqdata->inflight_rq;
 }
 
+//TODO:JAVIER: THIS IS WRONG!!
 static inline struct rrpc *get_rrpc_from_rq(struct request *rq)
 {
 	return rq->sense;
 }
 
-static inline int rrpc_lock_rq(struct rrpc *rrpc, struct request *rq,
+static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
 							struct nvm_rq *rqdata)
 {
-	sector_t laddr = nvm_get_laddr(rq);
-	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
+	sector_t laddr = nvm_get_laddr(bio);
+	unsigned int pages = nvm_get_pages(bio);
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
-
-	if (get_rrpc_from_rq(rq))
-		return 0;
 
 	return rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
@@ -194,15 +222,25 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 	spin_unlock_irqrestore(&map->lock, flags);
 }
 
-static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct request *rq,
+//TODO: JAVIER: Change name
+static inline void rrpc_unlock_rq2(struct rrpc *rrpc, struct request *rq,
 							struct nvm_rq *rqdata)
 {
-	sector_t laddr = nvm_get_laddr(rq);
+	sector_t laddr = blk_rq_pos(rq) / NR_PHY_IN_LOG;
 	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
-	if (get_rrpc_from_rq(rq))
-		return;
+	BUG_ON((laddr + pages) > rrpc->nr_pages);
+
+	rrpc_unlock_laddr(rrpc, laddr, r);
+}
+
+static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct bio *bio,
+							struct nvm_rq *rqdata)
+{
+	sector_t laddr = nvm_get_laddr(bio);
+	unsigned int pages = nvm_get_pages(bio);
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
 
 	BUG_ON((laddr + pages) > rrpc->nr_pages);
 
