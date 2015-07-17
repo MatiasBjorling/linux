@@ -419,7 +419,7 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 void nvme_nvm_end_io(struct request *rq, int error)
 {
 	struct nvm_rq *rqdata = rq->end_io_data;
-	struct nvm_target_instance *ins = rqdata->ins;
+	struct nvm_tgt_instance *ins = rqdata->ins;
 
 	ins->tt->end_io(rq->end_io_data, error);
 }
