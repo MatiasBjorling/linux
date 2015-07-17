@@ -184,6 +184,7 @@ struct nvm_dev {
 	 * blocks at run-time. */
 	unsigned long total_pages;
 	unsigned long total_blocks;
+	unsigned max_pages_per_blk;
 
 	uint32_t sector_size;
 
@@ -241,6 +242,7 @@ typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
 	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
 typedef int (nvm_bm_save_state_fn)(struct file *);
 typedef int (nvm_bm_restore_state_fn)(struct file *);
+typedef struct nvm_lun *(nvm_bm_get_luns_fn)(struct nvm_dev *, int, int);
 typedef void (nvm_bm_free_blocks_print_fn)(struct nvm_dev *, char *);
 
 struct nvm_bm_type {
@@ -263,6 +265,9 @@ struct nvm_bm_type {
 	/* State management for debugging purposes */
 	nvm_bm_save_state_fn *save_state;
 	nvm_bm_restore_state_fn *restore_state;
+
+	/* Configuration management */
+	nvm_bm_get_luns_fn *get_luns;
 
 	/* Statistics */
 	nvm_bm_free_blocks_print_fn *free_blocks_print;
