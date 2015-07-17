@@ -33,9 +33,9 @@ static LIST_HEAD(_targets);
 static LIST_HEAD(_bms);
 static DECLARE_RWSEM(_lock);
 
-struct nvm_target_type *nvm_find_target_type(const char *name)
+struct nvm_tgt_type *nvm_find_target_type(const char *name)
 {
-	struct nvm_target_type *tt;
+	struct nvm_tgt_type *tt;
 
 	list_for_each_entry(tt, &_targets, list)
 		if (!strcmp(name, tt->name))
@@ -44,7 +44,7 @@ struct nvm_target_type *nvm_find_target_type(const char *name)
 	return NULL;
 }
 
-int nvm_register_target(struct nvm_target_type *tt)
+int nvm_register_target(struct nvm_tgt_type *tt)
 {
 	int ret = 0;
 
@@ -59,7 +59,7 @@ int nvm_register_target(struct nvm_target_type *tt)
 }
 EXPORT_SYMBOL(nvm_register_target);
 
-void nvm_unregister_target(struct nvm_target_type *tt)
+void nvm_unregister_target(struct nvm_tgt_type *tt)
 {
 	if (!tt)
 		return;
@@ -140,7 +140,7 @@ void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 EXPORT_SYMBOL(nvm_put_blk);
 
 int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_rq *rqdata,
-						struct nvm_target_instance *ins)
+						struct nvm_tgt_instance *ins)
 {
 	rqdata->ins = ins;
 	rqdata->bio = bio;
@@ -307,7 +307,7 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	struct nvm_dev *qnvm = bdisk->nvm;
 	struct request_queue *tqueue;
 	struct gendisk *tdisk;
-	struct nvm_target_type *tt;
+	struct nvm_tgt_type *tt;
 	struct nvm_target *t;
 	void *targetdata;
 
@@ -380,7 +380,7 @@ err_t:
 /* _lock must be taken */
 static void nvm_remove_target(struct nvm_target *t)
 {
-	struct nvm_target_type *tt = t->type;
+	struct nvm_tgt_type *tt = t->type;
 	struct gendisk *tdisk = t->disk;
 	struct request_queue *q = tdisk->queue;
 

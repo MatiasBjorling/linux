@@ -69,16 +69,16 @@ struct nvm_get_features {
 
 struct nvm_target {
 	struct list_head list;
-	struct nvm_target_type *type;
+	struct nvm_tgt_type *type;
 	struct gendisk *disk;
 };
 
-struct nvm_target_instance {
-	struct nvm_target_type *tt;
+struct nvm_tgt_instance {
+	struct nvm_tgt_type *tt;
 };
 
 struct nvm_rq {
-	struct nvm_target_instance *ins;
+	struct nvm_tgt_instance *ins;
 	struct bio *bio;
 	sector_t phys_sector;
 };
@@ -219,7 +219,7 @@ typedef void (nvm_tgt_end_io_fn)(struct nvm_rq *, int);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
 
-struct nvm_target_type {
+struct nvm_tgt_type {
 	const char *name;
 	unsigned int version[3];
 
@@ -236,8 +236,8 @@ struct nvm_target_type {
 	struct list_head list;
 };
 
-extern int nvm_register_target(struct nvm_target_type *);
-extern void nvm_unregister_target(struct nvm_target_type *);
+extern int nvm_register_target(struct nvm_tgt_type *);
+extern void nvm_unregister_target(struct nvm_tgt_type *);
 
 typedef int (nvm_bm_register_fn)(struct nvm_dev *);
 typedef void (nvm_bm_unregister_fn)(struct nvm_dev *);
@@ -301,7 +301,7 @@ extern int nvm_register(struct request_queue *, struct gendisk *,
 extern void nvm_unregister(struct gendisk *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *,
-						struct nvm_target_instance *);
+						struct nvm_tgt_instance *);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 
@@ -365,18 +365,18 @@ struct nvm_lun;
 struct nvm_block;
 struct nvm_rq {
 };
-struct nvm_target_type;
-struct nvm_target_instance;
+struct nvm_tgt_type;
+struct nvm_tgt_instance;
 
-static inline struct nvm_target_type *nvm_find_target_type(const char *c)
+static inline struct nvm_tgt_type *nvm_find_target_type(const char *c)
 {
 	return NULL;
 }
-static inline int nvm_register_target(struct nvm_target_type *tt)
+static inline int nvm_register_target(struct nvm_tgt_type *tt)
 {
 	return -EINVAL;
 }
-static inline void nvm_unregister_target(struct nvm_target_type *tt) {}
+static inline void nvm_unregister_target(struct nvm_tgt_type *tt) {}
 static inline int nvm_register(struct request_queue *q, struct gendisk *disk,
 							struct nvm_dev_ops *ops)
 {
