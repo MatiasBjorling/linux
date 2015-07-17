@@ -411,7 +411,7 @@ static int null_nvm_get_features(struct request_queue *q,
 }
 
 static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
-			struct nvm_target_instance *ins, struct nvm_rq *rqdata)
+							struct nvm_rq *rqdata)
 {
 	struct request *rq;
 
@@ -428,7 +428,8 @@ static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
 
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
-	rq->special = ins;
+	
+	rq->sense = rqdata;
 
 	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
 
