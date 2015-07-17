@@ -410,7 +410,7 @@ static int null_nvm_get_features(struct request_queue *q,
 static void null_nvm_end_io(struct request *rq, int error)
 {
 	struct nvm_rq *rqdata = rq->end_io_data;
-	struct nvm_target_instance *ins = rqdata->ins;
+	struct nvm_tgt_instance *ins = rqdata->ins;
 
 	ins->tt->end_io(rq->end_io_data, error);
 }
