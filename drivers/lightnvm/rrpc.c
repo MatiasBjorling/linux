@@ -617,7 +617,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio,
 static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq *rqdata, unsigned long flags)
 {
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)rqdata->priv;
+	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)rqdata->priv;
 	struct nvm_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
@@ -639,11 +639,9 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 	return NVM_PREP_OK;
 }
 
-static int rrpc_prep_rq(struct bio *bio, struct nvm_rq *rqdata,
-					void *private, unsigned long flags)
+static int rrpc_prep_rq(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqdata, unsigned long flags)
 {
-	struct rrpc *rrpc = private;
-
 	if (bio_rw(bio) == WRITE)
 		return rrpc_write_rq(rrpc, bio, rqdata, flags);
 
@@ -654,7 +652,7 @@ static void rrpc_requeue_request(struct bio *bio, struct rrpc *rrpc,
 							struct nvm_rq **rqdata)
 {
 	struct rrpc_requeue_rq *req_rq;
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)(*rqdata)->priv;
+	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)(*rqdata)->priv;
 
 	if (!t_rqdata->req_rq) {
 		req_rq = mempool_alloc(rrpc->requeue_pool, GFP_KERNEL);
@@ -686,7 +684,7 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 
 	//XXX: Can we risk having an infinite loop here?
 	do {
-		switch (rrpc_prep_rq(bio_ins, rqdata_ins, rrpc_ins, flags_ins)) {
+		switch (rrpc_prep_rq(rrpc, bio_ins, rqdata_ins, flags_ins)) {
 			case NVM_PREP_ERROR:
 				/*TODO: Signal error*/
 			case NVM_PREP_DONE:
