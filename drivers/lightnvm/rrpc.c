@@ -538,20 +538,20 @@ err:
 	return NULL;
 }
 
-static void rrpc_unprep_rq(struct request *rq, void *private)
+static void rrpc_end_io(struct nvm_rq *rqdata, int error)
 {
-	struct nvm_rq *rqdata = private;
-	struct rrpc *rrpc = (void*)rqdata->ins;
-	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
-	struct nvm_addr *p = t_rqdata->addr;
+	struct rrpc *rrpc = container_of(rqdata->ins, struct rrpc, instance);
+	struct rrpc_rq *rrqdata = nvm_rq_to_pdu(rqdata);
+	struct bio *bio = rqdata->bio;
+	struct nvm_addr *p = rrqdata->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
 	struct rrpc_block_gc *gcb;
 	int cmnt_size;
 
-	rrpc_unlock_rq(rrpc, rq->bio, rqdata);
+	rrpc_unlock_rq(rrpc, bio, rqdata);
 
-	if (rq_data_dir(rq) == WRITE) {
+	if (bio_data_dir(bio) == WRITE) {
 		cmnt_size = atomic_inc_return(&block->data_cmnt_size);
 		if (likely(cmnt_size != lun->nr_pages_per_blk))
 			goto free_rqdata;
@@ -570,10 +570,9 @@ static void rrpc_unprep_rq(struct request *rq, void *private)
 	}
 
 free_rq_data_req:
-	mempool_free(t_rqdata->req_rq, rrpc->requeue_pool);
+	mempool_free(rrqdata->req_rq, rrpc->requeue_pool);
 free_rqdata:
-	if (rqdata)
-		mempool_free(rqdata, rrpc->rq_pool);
+	mempool_free(rqdata, rrpc->rq_pool);
 }
 
 static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio,
@@ -1210,8 +1209,8 @@ static struct nvm_target_type tt_rrpc = {
 	.name		= "rrpc",
 
 	.make_rq	= rrpc_make_rq,
-
 	.capacity	= rrpc_capacity,
+	.end_io		= rrpc_end_io,
 
 	.init		= rrpc_init,
 	.exit		= rrpc_exit,
