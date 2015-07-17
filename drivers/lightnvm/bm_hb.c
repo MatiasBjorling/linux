@@ -307,12 +307,18 @@ static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 
 static int hb_submit_io(struct nvm_dev *dev, struct bio *bio,
-			struct nvm_rq *rqdata, struct nvm_target_instance *ins)
+							struct nvm_rq *rqdata)
 {
 	if (!dev->ops->submit_io)
 		return 0;
 
-	return dev->ops->submit_io(dev->q, bio, rqdata, ins);
+	return dev->ops->submit_io(dev->q, bio, rqdata);
+}
+
+static void hb_end_io(struct nvm_rq *rqdata, int error)
+{
+	struct nvm_target_instance *ins = rqdata->ins;
+	ins->tt->end_io(rqdata, error);
 }
 
 static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
@@ -350,6 +356,7 @@ static struct nvm_bm_type bm_hb = {
 	.put_blk	= hb_put_blk,
 
 	.submit_io	= hb_submit_io,
+	.end_io		= hb_end_io,
 	.erase_blk	= hb_erase_blk,
 
 	.get_luns	= hb_get_luns,
