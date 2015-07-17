@@ -108,7 +108,7 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
-	struct nvm_rq *, struct nvm_target_instance *, unsigned long flags);
+				struct nvm_rq *, struct nvm_target_instance *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
 struct nvm_dev_ops {
@@ -245,7 +245,7 @@ typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct bio *,
-	     struct nvm_rq *, struct nvm_target_instance *, unsigned long);
+	     struct nvm_rq *, struct nvm_target_instance *);
 typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
 	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
