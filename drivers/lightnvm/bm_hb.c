@@ -68,6 +68,9 @@ static int hb_luns_init(struct nvm_dev *dev, struct bm_hb *bm)
 		lun->nr_pages_per_blk = chnl->gran_erase / chnl->gran_write *
 					(chnl->gran_write / dev->sector_size);
 
+		if (lun->nr_pages_per_blk > dev->max_pages_per_blk)
+			dev->max_pages_per_blk = lun->nr_pages_per_blk;
+
 		dev->total_pages += lun->nr_blocks * lun->nr_pages_per_blk;
 		dev->total_blocks += lun->nr_blocks;
 
@@ -304,13 +307,13 @@ static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 
 static int hb_submit_io(struct nvm_dev *dev, struct bio *bio,
-			struct nvm_ppalist *ppa,
+			struct nvm_rq *rqdata,
 			struct nvm_target_instance *ins, unsigned long flags)
 {
 	if (!dev->ops->submit_io)
 		return 0;
 
-	return dev->ops->submit_io(dev->q, bio, ppa, ins, flags);
+	return dev->ops->submit_io(dev->q, bio, rqdata, ins, flags);
 }
 
 static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
@@ -319,6 +322,13 @@ static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 		return 0;
 
 	return dev->ops->erase_block(dev->q, blk->id);
+}
+
+static struct nvm_lun *hb_get_luns(struct nvm_dev *dev, int begin, int end)
+{
+	struct bm_hb *bm = dev->bmp;
+
+	return bm->luns + begin;
 }
 
 static void hb_free_blocks_print(struct nvm_dev *dev, char *page)
@@ -343,6 +353,7 @@ static struct nvm_bm_type bm_hb = {
 	.submit_io	= hb_submit_io,
 	.erase_blk	= hb_erase_blk,
 
+	.get_luns	= hb_get_luns,
 	.free_blocks_print = hb_free_blocks_print,
 };
 
