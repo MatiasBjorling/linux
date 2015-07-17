@@ -108,7 +108,7 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
-				struct nvm_rq *, struct nvm_target_instance *);
+							struct nvm_rq *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
 struct nvm_dev_ops {

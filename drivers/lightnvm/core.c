@@ -153,7 +153,8 @@ EXPORT_SYMBOL(nvm_alloc_addr);
 int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_rq *rqdata,
 						struct nvm_target_instance *ins)
 {
-	return dev->bm->submit_io(dev, bio, rqdata, ins);
+	rqdata->ins = ins;
+	return dev->ops->submit_io(dev->q, bio, rqdata);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
