@@ -20,8 +20,8 @@ static struct kmem_cache *_gcb_cache, *_rq_cache, *_requeue_cache;
 static struct list_head rq_queue;
 static DECLARE_RWSEM(_lock);
 
-static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
-					struct rrpc *rrpc, unsigned long flags);
+static void rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqdata, unsigned long flags);
 
 #define rrpc_for_each_lun(rrpc, rlun, i) \
 		for ((i) = 0, rlun = &(rrpc)->luns[0]; \
@@ -240,7 +240,7 @@ try:
 		/* TODO: may fail when EXP_PG_SIZE > PAGE_SIZE */
 		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
 
-		rrpc_submit_io(bio, rqdata, rrpc, NVM_IOTYPE_GC);
+		rrpc_submit_io(rrpc, bio, rqdata, NVM_IOTYPE_GC);
 		wait_for_completion_io(&wait);
 
 		bio_reset(bio);
@@ -255,7 +255,7 @@ try:
 
 		/* turn the command around and write the data back to a new
 		 * address */
-		rrpc_submit_io(bio, rqdata, rrpc, NVM_IOTYPE_GC);
+		rrpc_submit_io(rrpc, bio, rqdata, NVM_IOTYPE_GC);
 		wait_for_completion_io(&wait);
 
 		rrpc_inflight_laddr_release(rrpc, rqdata);
@@ -639,32 +639,32 @@ static int rrpc_prep_rq(struct rrpc *rrpc, struct bio *bio,
 }
 
 static void rrpc_requeue_request(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq **rqdata, unsigned long flags)
+				struct nvm_rq *rqdata, unsigned long flags)
 {
 	struct rrpc_requeue_rq *req_rq;
-	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(*rqdata);
+	struct rrpc_rq *rrqdata = nvm_rq_to_pdu(rqdata);
 
-	if (!t_rqdata->req_rq) {
+	if (!rrqdata->req_rq) {
 		req_rq = mempool_alloc(rrpc->requeue_pool, GFP_KERNEL);
 		if (!req_rq) {
 			pr_err("rrpc: not able to requeue request.");
 			return;
 		}
 
-		t_rqdata->req_rq = req_rq;
+		rrqdata->req_rq = req_rq;
 	} else
-		req_rq = t_rqdata->req_rq;
+		req_rq = rrqdata->req_rq;
 
 	req_rq->rrpc = rrpc;
 	req_rq->bio = bio;
-	req_rq->rqdata = *rqdata;
+	req_rq->rqdata = rqdata;
 	req_rq->flags = flags;
 
 	list_add_tail(&req_rq->list, &rq_queue);
 }
 
-static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
-					struct rrpc *rrpc, unsigned long flags)
+static void rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqdata, unsigned long flags)
 {
 	struct bio *bio_ins = bio;
 	struct nvm_rq *rqdata_ins = rqdata;
@@ -681,7 +681,7 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 				goto free;
 			case NVM_PREP_REQUEUE:
 				rrpc_requeue_request(rrpc_ins, bio_ins,
-							&rqdata_ins, flags_ins);
+							rqdata_ins, flags_ins);
 		}
 
 		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, rqdata_ins,
@@ -723,13 +723,14 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 	rqdata = mempool_alloc(rrpc->rq_pool, GFP_KERNEL);
 	if (!rqdata) {
 		pr_err("rrpc: not able to queue new request.");
+		bio_endio(bio, -ENOMEM);
 		return;
 	}
 
 	rrqdata = nvm_rq_to_pdu(rqdata);
 	rrqdata->req_rq = NULL;
 
-	rrpc_submit_io(bio, rqdata, rrpc, flags);
+	rrpc_submit_io(rrpc, bio, rqdata, flags);
 }
 
 static void rrpc_gc_free(struct rrpc *rrpc)
@@ -856,7 +857,6 @@ static int rrpc_map_init(struct rrpc *rrpc)
 #define PAGE_POOL_SIZE 16
 #define ADDR_POOL_SIZE 64
 
-/* TODO: Create only one memory pool for nvm_rq that encloses rrpc_rq */
 static int rrpc_core_init(struct rrpc *rrpc)
 {
 	int i;
