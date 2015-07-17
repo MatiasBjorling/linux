@@ -617,9 +617,6 @@ static void req_completion(struct nvme_queue *nvmeq, void *ctx,
 	if (req->cmd_type == REQ_TYPE_DRV_PRIV) {
 		u32 result = le32_to_cpup(&cqe->result);
 		req->special = (void *)(uintptr_t)result;
-
-		if (blk_rq_pos(req) != (sector_t) -1)
-			nvm_unprep_rq(req, &iod->nvmrq);
 	}
 
 	if (cmd_rq->aborted)
@@ -918,21 +915,6 @@ static int nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 		}
 	}
 
-	if (ns && ns->type == NVME_NS_NVM) {
-		switch (nvm_prep_rq(req, &iod->nvmrq)) {
-		case NVM_PREP_DONE:
-			goto done_cmd;
-		case NVM_PREP_REQUEUE:
-			blk_mq_requeue_request(req);
-			blk_mq_kick_requeue_list(hctx->queue);
-			goto done_cmd;
-		case NVM_PREP_BUSY:
-			goto retry_cmd;
-		case NVM_PREP_ERROR:
-			goto error_cmd;
-		}
-	}
-
 	nvme_set_info(cmd, iod, req_completion);
 	spin_lock_irq(&nvmeq->q_lock);
 	if (req->cmd_type == REQ_TYPE_DRV_PRIV)
@@ -948,9 +930,6 @@ static int nvme_queue_rq(struct blk_mq_hw_ctx *hctx,
 	spin_unlock_irq(&nvmeq->q_lock);
 	return BLK_MQ_RQ_QUEUE_OK;
 
- done_cmd:
-	nvme_free_iod(dev, iod);
-	return BLK_MQ_RQ_QUEUE_OK;
  error_cmd:
 	nvme_free_iod(dev, iod);
 	return BLK_MQ_RQ_QUEUE_ERROR;

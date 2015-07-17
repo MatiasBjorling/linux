@@ -421,7 +421,7 @@ void nvme_nvm_end_io(struct request *rq, int error)
 	struct nvm_rq *rqdata = rq->end_io_data;
 	struct nvm_target_instance *ins = rqdata->ins;
 
-	ins->end_io(rq->end_io_data, error);
+	ins->tt->end_io(rq->end_io_data, error);
 }
 
 static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
@@ -443,9 +443,9 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
 
-	rq->sense = rqdata;
+	rq->end_io_data = rqdata;
 
-	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
+	blk_execute_rq_nowait(q, NULL, rq, 0, nvme_nvm_end_io);
 
 	return 0;
 }
