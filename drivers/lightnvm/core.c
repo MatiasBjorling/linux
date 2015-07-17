@@ -150,10 +150,10 @@ out:
 }
 EXPORT_SYMBOL(nvm_alloc_addr);
 
-int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_ppalist *ppa,
+int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_rq *rqdata,
 			struct nvm_target_instance *ins, unsigned long flags)
 {
-	return dev->bm->submit_io(dev, bio, ppa, ins, flags);
+	return dev->bm->submit_io(dev, bio, rqdata, ins, flags);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
@@ -566,27 +566,3 @@ void nvm_unregister(struct gendisk *disk)
 	nvm_exit(disk->nvm);
 }
 EXPORT_SYMBOL(nvm_unregister);
-
-int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
-{
-	struct nvm_target_instance *ins = rq->special;
-
-	if (blk_rq_pos(rq) == (sector_t) -1)
-		return 0;
-
-	WARN_ON(rqdata->phys_sector);
-
-	return ins->tt->prep_rq(rq, rqdata, ins);
-}
-EXPORT_SYMBOL(nvm_prep_rq);
-
-void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
-{
-	struct nvm_target_instance *ins = rq->special;
-
-	if (!rqdata->phys_sector)
-		return;
-
-	ins->tt->unprep_rq(rq, rqdata, ins);
-}
-EXPORT_SYMBOL(nvm_unprep_rq);
