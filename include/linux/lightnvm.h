@@ -80,8 +80,17 @@ struct nvm_target_instance {
 struct nvm_rq {
 	struct nvm_target_instance *ins;
 	sector_t phys_sector;
-	void *priv;
 };
+
+static inline struct nvm_rq *nvm_rq_from_pdu(void *pdu)
+{
+	return pdu - sizeof(struct nvm_rq);
+}
+
+static inline void *nvm_rq_to_pdu(struct nvm_rq *rqdata)
+{
+	return rqdata + 1;
+}
 
 struct nvm_block;
 
