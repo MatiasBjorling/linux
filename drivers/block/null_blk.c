@@ -413,6 +413,8 @@ static void null_nvm_end_io(struct request *rq, int error)
 	struct nvm_tgt_instance *ins = rqdata->ins;
 
 	ins->tt->end_io(rq->end_io_data, error);
+
+	blk_put_request(rq);
 }
 
 static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
