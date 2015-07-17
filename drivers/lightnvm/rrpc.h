@@ -78,7 +78,7 @@ struct rrpc_lun {
 
 struct rrpc {
 	/* instance must be kept in top to resolve rrpc in unprep */
-	struct nvm_target_instance instance;
+	struct nvm_tgt_instance instance;
 
 	struct nvm_dev *q_nvm;
 	struct request_queue *q_dev;

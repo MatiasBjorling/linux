@@ -1108,7 +1108,7 @@ static int rrpc_luns_configure(struct rrpc *rrpc)
 	return 0;
 }
 
-static struct nvm_target_type tt_rrpc;
+static struct nvm_tgt_type tt_rrpc;
 
 static void *rrpc_init(struct gendisk *bdisk, struct gendisk *tdisk,
 						int lun_begin, int lun_end)
@@ -1205,7 +1205,7 @@ err:
 }
 
 /* round robin, page-based FTL, and cost-based GC */
-static struct nvm_target_type tt_rrpc = {
+static struct nvm_tgt_type tt_rrpc = {
 	.name		= "rrpc",
 
 	.make_rq	= rrpc_make_rq,
