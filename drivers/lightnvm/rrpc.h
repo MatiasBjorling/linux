@@ -59,8 +59,6 @@ struct rrpc_rq {
 	unsigned int flags;
 };
 
-struct rrpc_lun;
-
 struct rrpc_block {
 	struct nvm_block *parent;
 	struct list_head prio;
