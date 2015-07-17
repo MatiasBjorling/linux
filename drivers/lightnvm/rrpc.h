@@ -112,7 +112,6 @@ struct rrpc {
 	mempool_t *addr_pool;
 	mempool_t *page_pool;
 	mempool_t *gcb_pool;
-	mempool_t *t_rq_pool;
 	mempool_t *rq_pool;
 	mempool_t *requeue_pool;
 
@@ -186,10 +185,11 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 	return __rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
 
-static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
+static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *rq)
 {
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)n->priv;
-	return &t_rqdata->inflight_rq;
+	struct rrpc_rq *rrq = nvm_rq_to_pdu(rq);
+
+	return &rrq->inflight_rq;
 }
 
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,

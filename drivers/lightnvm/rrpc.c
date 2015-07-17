@@ -16,7 +16,7 @@
 
 #include "rrpc.h"
 
-static struct kmem_cache *_gcb_cache, *_t_rq_cache, *_rq_cache, *_requeue_cache;
+static struct kmem_cache *_gcb_cache, *_rq_cache, *_requeue_cache;
 static struct list_head rq_queue;
 static DECLARE_RWSEM(_lock);
 
@@ -71,12 +71,7 @@ static struct nvm_rq *rrpc_inflight_laddr_acquire(struct rrpc *rrpc,
 					sector_t laddr, unsigned int pages)
 {
 	struct nvm_rq *rqdata;
-	struct rrpc_rq *t_rqdata;
 	struct rrpc_inflight_rq *inf;
-
-	t_rqdata = mempool_alloc(rrpc->t_rq_pool, GFP_ATOMIC);
-	if (!t_rqdata)
-		return ERR_PTR(-ENOMEM);
 
 	rqdata = mempool_alloc(rrpc->rq_pool, GFP_ATOMIC);
 	if (!rqdata)
@@ -97,7 +92,6 @@ static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqdata
 
 	rrpc_unlock_laddr(rrpc, inf->l_start, inf);
 
-	mempool_free(rqdata->priv, rrpc->t_rq_pool);
 	mempool_free(rqdata, rrpc->rq_pool);
 }
 
@@ -549,7 +543,7 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 								void *private)
 {
 	struct rrpc *rrpc = private;
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)rqdata->priv;
+	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
 	struct nvm_addr *p = t_rqdata->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
@@ -579,8 +573,6 @@ static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
 free_rq_data_req:
 	mempool_free(t_rqdata->req_rq, rrpc->requeue_pool);
 free_rqdata:
-	if (t_rqdata)
-		mempool_free(t_rqdata, rrpc->t_rq_pool);
 	if (rqdata)
 		mempool_free(rqdata, rrpc->rq_pool);
 }
@@ -588,7 +580,7 @@ free_rqdata:
 static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq *rqdata)
 {
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq*)rqdata->priv;
+	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
 	struct nvm_addr *gp;
 	sector_t l_addr = nvm_get_laddr(bio);
 
@@ -616,7 +608,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio,
 static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq *rqdata, unsigned long flags)
 {
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)rqdata->priv;
+	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
 	struct nvm_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
@@ -651,7 +643,7 @@ static void rrpc_requeue_request(struct bio *bio, struct rrpc *rrpc,
 							struct nvm_rq **rqdata)
 {
 	struct rrpc_requeue_rq *req_rq;
-	struct rrpc_rq *t_rqdata = (struct rrpc_rq *)(*rqdata)->priv;
+	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(*rqdata);
 
 	if (!t_rqdata->req_rq) {
 		req_rq = mempool_alloc(rrpc->requeue_pool, GFP_KERNEL);
@@ -676,7 +668,6 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 {
 	struct bio *bio_ins = bio;
 	struct nvm_rq *rqdata_ins = rqdata;
-	struct rrpc_rq *t_rqdata_ins = (struct rrpc_rq*)rqdata_ins->priv;
 	struct rrpc *rrpc_ins = rrpc;
 	unsigned long flags_ins = flags;
 	struct rrpc_requeue_rq *req_rq;
@@ -714,7 +705,6 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 	return;
 
 free:
-	mempool_free(t_rqdata_ins, rrpc_ins->t_rq_pool);
 	mempool_free(rqdata_ins, rrpc_ins->rq_pool);
 }
 
@@ -722,7 +712,7 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 {
 	struct rrpc *rrpc = q->queuedata;
 	struct nvm_rq *rqdata;
-	struct rrpc_rq *t_rqdata;
+	struct rrpc_rq *rrqdata;
 	unsigned long flags = NVM_IOTYPE_NONE;
 
 	if (bio->bi_rw & REQ_DISCARD) {
@@ -730,20 +720,14 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 		return;
 	}
 
-	t_rqdata = mempool_alloc(rrpc->t_rq_pool, GFP_KERNEL);
-	if (!t_rqdata) {
+	rqdata = mempool_alloc(rrpc->rq_pool, GFP_KERNEL);
+	if (!rqdata) {
 		pr_err("rrpc: not able to queue new request.");
 		return;
 	}
 
-	rqdata = mempool_alloc(rrpc->rq_pool, GFP_KERNEL);
-	if (!rqdata) {
-		pr_err("rrpc: not able to queue new request.");
-		mempool_free(t_rqdata, rrpc->t_rq_pool);
-		return;
-	}
-	t_rqdata->req_rq = NULL;
-	rqdata->priv = t_rqdata;
+	rrqdata = nvm_rq_to_pdu(rqdata);
+	rrqdata->req_rq = NULL;
 
 	rrpc_submit_io(bio, rqdata, rrpc, flags);
 }
@@ -879,26 +863,21 @@ static int rrpc_core_init(struct rrpc *rrpc)
 
 	down_write(&_lock);
 	if (!_gcb_cache) {
-		_gcb_cache = kmem_cache_create("nvm_gcb_cache",
+		_gcb_cache = kmem_cache_create("rrpc_gcb",
 				sizeof(struct rrpc_block_gc), 0, 0, NULL);
 		if (!_gcb_cache) {
 			up_write(&_lock);
 			return -ENOMEM;
 		}
 
-		_t_rq_cache = kmem_cache_create("rrpc_rq_cache",
-				sizeof(struct rrpc_rq), 0, 0, NULL);
-		if (!_t_rq_cache) {
+		_rq_cache = kmem_cache_create("rrpc_rq",
+				sizeof(struct nvm_rq) + sizeof(struct rrpc_rq),
+				0, 0, NULL);
+		if (!_rq_cache) {
 			goto destroy_gcb_cache;
 		}
 
-		_rq_cache = kmem_cache_create("nvme_rq_cache",
-				sizeof(struct nvm_rq), 0, 0, NULL);
-		if (!_rq_cache) {
-			goto destroy_t_rq_cache;
-		}
-
-		_requeue_cache = kmem_cache_create("nvme_requeue_cache",
+		_requeue_cache = kmem_cache_create("rrpc_requeue",
 				sizeof(struct rrpc_requeue_rq), 0, 0, NULL);
 		if (!_requeue_cache) {
 			goto destroy_rq_cache;
@@ -913,10 +892,6 @@ static int rrpc_core_init(struct rrpc *rrpc)
 	rrpc->gcb_pool = mempool_create_slab_pool(rrpc->q_nvm->nr_luns,
 								_gcb_cache);
 	if (!rrpc->gcb_pool)
-		return -ENOMEM;
-
-	rrpc->t_rq_pool = mempool_create_slab_pool(64, _t_rq_cache);
-	if (!rrpc->t_rq_pool)
 		return -ENOMEM;
 
 	rrpc->rq_pool = mempool_create_slab_pool(64, _rq_cache);
@@ -940,8 +915,6 @@ static int rrpc_core_init(struct rrpc *rrpc)
 
 destroy_rq_cache:
 	kmem_cache_destroy(_rq_cache);
-destroy_t_rq_cache:
-	kmem_cache_destroy(_t_rq_cache);
 destroy_gcb_cache:
 	kmem_cache_destroy(_gcb_cache);
 	up_write(&_lock);
@@ -954,8 +927,6 @@ static void rrpc_core_free(struct rrpc *rrpc)
 		mempool_destroy(rrpc->page_pool);
 	if (rrpc->gcb_pool)
 		mempool_destroy(rrpc->gcb_pool);
-	if (rrpc->t_rq_pool)
-		mempool_destroy(rrpc->t_rq_pool);
 	if (rrpc->rq_pool)
 		mempool_destroy(rrpc->rq_pool);
 	if (rrpc->requeue_pool)
