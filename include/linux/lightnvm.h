@@ -77,8 +77,10 @@ struct nvm_target_instance {
 	struct nvm_target_type *tt;
 };
 
-struct nvm_ppalist {
-	uint64_t ppa[64];
+struct nvm_rq {
+	struct nvm_target_instance *ins;
+	sector_t phys_sector;
+	void *priv;
 };
 
 struct nvm_block;
@@ -200,22 +202,7 @@ struct nvm_rev_addr {
 	sector_t addr;
 };
 
-struct rrpc_inflight_rq {
-	struct list_head list;
-	sector_t l_start;
-	sector_t l_end;
-};
-
-struct nvm_rq {
-	struct nvm_target_instance *ins;
-	sector_t phys_sector;
-	void *priv
-};
-
 typedef void (nvm_tgt_make_rq)(struct request_queue *, struct bio *);
-typedef int (nvm_tgt_prep_rq)(struct bio *, struct nvm_rq *, void *);
-typedef void (nvm_tgt_unprep_rq)(struct request *, struct nvm_rq *,
-									void *);
 typedef sector_t (nvm_tgt_capacity)(void *);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
@@ -226,8 +213,6 @@ struct nvm_target_type {
 
 	/* target entry points */
 	nvm_tgt_make_rq *make_rq;
-	nvm_tgt_prep_rq *prep_rq;
-	nvm_tgt_unprep_rq *unprep_rq;
 	nvm_tgt_capacity *capacity;
 
 	/* module-specific init/teardown */
@@ -250,7 +235,7 @@ typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct bio *,
-	     struct nvm_ppalist *, struct nvm_target_instance *, unsigned long);
+	     struct nvm_rq *, struct nvm_target_instance *, unsigned long);
 typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
 	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
