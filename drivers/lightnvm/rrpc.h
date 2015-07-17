@@ -194,12 +194,6 @@ static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *n)
 	return &t_rqdata->inflight_rq;
 }
 
-//TODO:JAVIER: THIS IS WRONG!!
-static inline struct rrpc *get_rrpc_from_rq(struct request *rq)
-{
-	return rq->sense;
-}
-
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
 							struct nvm_rq *rqdata)
 {
