@@ -638,7 +638,7 @@ static int rrpc_prep_rq(struct rrpc *rrpc, struct bio *bio,
 	return rrpc_read_rq(rrpc, bio, rqdata);
 }
 
-static void rrpc_requeue_request(struct bio *bio, struct rrpc *rrpc,
+static void rrpc_requeue_request(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq **rqdata, unsigned long flags)
 {
 	struct rrpc_requeue_rq *req_rq;
@@ -680,12 +680,12 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 			case NVM_PREP_DONE:
 				goto free;
 			case NVM_PREP_REQUEUE:
-				rrpc_requeue_request(bio_ins, rrpc_ins,
+				rrpc_requeue_request(rrpc_ins, bio_ins,
 							&rqdata_ins, flags_ins);
 		}
 
-		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, &rrpc_ins->instance,
-								rqdata_ins)) {
+		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, rqdata_ins,
+						&rrpc_ins->instance)) {
 			pr_err("rrpc: io submission failed");
 			goto free;
 		}
