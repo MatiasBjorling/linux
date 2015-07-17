@@ -696,8 +696,8 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 								&rqdata_ins);
 		}
 
-		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, &rrpc_ins->instance,
-						rqdata_ins, NVM_IOTYPE_NONE)) {
+		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, rqdata_ins,
+					&rrpc_ins->instance, NVM_IOTYPE_NONE)) {
 			pr_err("rrpc: io submission failed");
 			goto free;
 		}
@@ -1237,10 +1237,6 @@ static struct nvm_target_type tt_rrpc = {
 	.name		= "rrpc",
 
 	.make_rq	= rrpc_make_rq,
-
-	/* FIXME: Remove prep and unprep from here */
-	.prep_rq	= rrpc_prep_rq,
-	.unprep_rq	= rrpc_unprep_rq,
 
 	.capacity	= rrpc_capacity,
 
