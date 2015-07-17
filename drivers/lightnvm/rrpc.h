@@ -37,7 +37,7 @@ struct rrpc_requeue_rq {
 	struct rrpc *rrpc;
 	struct bio *bio;
 	struct nvm_rq *rqdata;
-	int flags;
+	unsigned long flags;
 	struct list_head list;
 };
 

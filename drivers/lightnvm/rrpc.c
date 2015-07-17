@@ -640,7 +640,7 @@ static int rrpc_prep_rq(struct rrpc *rrpc, struct bio *bio,
 }
 
 static void rrpc_requeue_request(struct bio *bio, struct rrpc *rrpc,
-							struct nvm_rq **rqdata)
+				struct nvm_rq **rqdata, unsigned long flags)
 {
 	struct rrpc_requeue_rq *req_rq;
 	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(*rqdata);
@@ -659,6 +659,7 @@ static void rrpc_requeue_request(struct bio *bio, struct rrpc *rrpc,
 	req_rq->rrpc = rrpc;
 	req_rq->bio = bio;
 	req_rq->rqdata = *rqdata;
+	req_rq->flags = flags;
 
 	list_add_tail(&req_rq->list, &rq_queue);
 }
@@ -669,8 +670,8 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 	struct bio *bio_ins = bio;
 	struct nvm_rq *rqdata_ins = rqdata;
 	struct rrpc *rrpc_ins = rrpc;
-	unsigned long flags_ins = flags;
 	struct rrpc_requeue_rq *req_rq;
+	unsigned long flags_ins = flags;
 
 	//XXX: Can we risk having an infinite loop here?
 	do {
@@ -681,11 +682,11 @@ static void rrpc_submit_io(struct bio *bio, struct nvm_rq *rqdata,
 				goto free;
 			case NVM_PREP_REQUEUE:
 				rrpc_requeue_request(bio_ins, rrpc_ins,
-								&rqdata_ins);
+							&rqdata_ins, flags_ins);
 		}
 
-		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, rqdata_ins,
-					&rrpc_ins->instance, NVM_IOTYPE_NONE)) {
+		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, &rrpc_ins->instance,
+								rqdata_ins)) {
 			pr_err("rrpc: io submission failed");
 			goto free;
 		}
