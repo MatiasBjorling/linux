@@ -283,9 +283,6 @@ static void null_softirq_done_fn(struct request *rq)
 
 static inline void null_handle_cmd(struct nullb_cmd *cmd)
 {
-	if (nvm_enable)
-		nvm_unprep_rq(cmd->rq, &cmd->nvmrq);
-
 	/* Complete IO by inline, softirq or timer */
 	switch (irqmode) {
 	case NULL_IRQ_SOFTIRQ:
@@ -410,6 +407,14 @@ static int null_nvm_get_features(struct request_queue *q,
 	return 0;
 }
 
+static void null_nvm_end_io(struct request *rq, int error)
+{
+	struct nvm_rq *rqdata = rq->end_io_data;
+	struct nvm_target_instance *ins = rqdata->ins;
+
+	ins->tt->end_io(rq->end_io_data, error);
+}
+
 static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
 							struct nvm_rq *rqdata)
 {
@@ -428,10 +433,10 @@ static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
 
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
-	
-	rq->sense = rqdata;
 
-	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
+	rq->end_io_data = rqdata;
+
+	blk_execute_rq_nowait(q, NULL, rq, 0, null_nvm_end_io);
 
 	return 0;
 }
