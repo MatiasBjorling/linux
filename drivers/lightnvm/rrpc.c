@@ -973,11 +973,16 @@ static void rrpc_luns_free(struct rrpc *rrpc)
 static int rrpc_luns_init(struct rrpc *rrpc, int lun_begin, int lun_end)
 {
 	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_lun *luns;
 	struct nvm_block *block;
 	struct rrpc_lun *rlun;
 	int i, j;
 
 	spin_lock_init(&rrpc->rev_lock);
+
+	luns = dev->bm->get_luns(dev, lun_begin, lun_end);
+	if (!luns)
+		return -EINVAL;
 
 	rrpc->luns = kcalloc(rrpc->nr_luns, sizeof(struct rrpc_lun),
 								GFP_KERNEL);
@@ -986,7 +991,7 @@ static int rrpc_luns_init(struct rrpc *rrpc, int lun_begin, int lun_end)
 
 	/* 1:1 mapping */
 	for (i = 0; i < rrpc->nr_luns; i++) {
-		struct nvm_lun *lun = &dev->luns[i + lun_begin];
+		struct nvm_lun *lun = &luns[i];
 
 		rlun = &rrpc->luns[i];
 		rlun->rrpc = rrpc;
@@ -1044,17 +1049,11 @@ static void rrpc_exit(void *private)
 static sector_t rrpc_capacity(void *private)
 {
 	struct rrpc *rrpc = private;
-	struct nvm_lun *lun;
+	struct nvm_dev *dev = rrpc->q_nvm;
 	sector_t reserved;
-	int i, max_pages_per_blk = 0;
-
-	nvm_for_each_lun(rrpc->q_nvm, lun, i) {
-		if (lun->nr_pages_per_blk > max_pages_per_blk)
-			max_pages_per_blk = lun->nr_pages_per_blk;
-	}
 
 	/* cur, gc, and two emergency blocks for each lun */
-	reserved = rrpc->nr_luns * max_pages_per_blk * 4;
+	reserved = rrpc->nr_luns * dev->max_pages_per_blk * 4;
 
 	if (reserved > rrpc->nr_pages) {
 		pr_err("rrpc: not enough space available to expose storage.\n");
@@ -1097,12 +1096,18 @@ static void rrpc_block_map_update(struct rrpc *rrpc, struct nvm_block *block)
 static int rrpc_blocks_init(struct rrpc *rrpc)
 {
 	struct nvm_dev *dev = rrpc->q_nvm;
-	struct nvm_lun *lun;
+	struct nvm_lun *lun, *luns;
 	struct nvm_block *blk;
 	sector_t lun_iter, blk_iter;
 
+	luns = dev->bm->get_luns(dev, rrpc->lun_offset, rrpc->lun_offset +
+			rrpc->nr_luns);
+
+	if (!luns)
+		return -EINVAL;
+
 	for (lun_iter = 0; lun_iter < rrpc->nr_luns; lun_iter++) {
-		lun = &dev->luns[lun_iter + rrpc->lun_offset];
+		lun = &luns[lun_iter];
 
 		lun_for_each_block(lun, blk, blk_iter)
 			rrpc_block_map_update(rrpc, blk);
