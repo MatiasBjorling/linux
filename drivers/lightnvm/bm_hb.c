@@ -307,13 +307,12 @@ static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 
 static int hb_submit_io(struct nvm_dev *dev, struct bio *bio,
-			struct nvm_rq *rqdata,
-			struct nvm_target_instance *ins, unsigned long flags)
+			struct nvm_rq *rqdata, struct nvm_target_instance *ins)
 {
 	if (!dev->ops->submit_io)
 		return 0;
 
-	return dev->ops->submit_io(dev->q, bio, rqdata, ins, flags);
+	return dev->ops->submit_io(dev->q, bio, rqdata, ins);
 }
 
 static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
