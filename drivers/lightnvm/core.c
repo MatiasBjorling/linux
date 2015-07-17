@@ -107,32 +107,6 @@ void nvm_unregister_bm(struct nvm_bm_type *bt)
 }
 EXPORT_SYMBOL(nvm_unregister_bm);
 
-/* use nvm_lun_[get/put]_block to administer the blocks in use for each lun.
- * Whenever a block is in used by an append point, we store it within the
- * used_list. We then move it back when its free to be used by another append
- * point.
- *
- * The newly claimed block is always added to the back of used_list. As we
- * assume that the start of used list is the oldest block, and therefore
- * more likely to contain invalidated pages.
- */
-struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
-							unsigned long flags)
-{
-	return dev->bm->get_blk(dev, lun, flags);
-}
-EXPORT_SYMBOL(nvm_get_blk);
-
-/* We assume that all valid pages have already been moved when added back to the
- * free list. We add it last to allow round-robin use of all pages. Thereby
- * provide simple (naive) wear-leveling.
- */
-void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
-{
-	return dev->bm->put_blk(dev, blk);
-}
-EXPORT_SYMBOL(nvm_put_blk);
-
 sector_t nvm_alloc_addr(struct nvm_block *block)
 {
 	sector_t addr = ADDR_EMPTY;
@@ -149,6 +123,21 @@ out:
 	return addr;
 }
 EXPORT_SYMBOL(nvm_alloc_addr);
+
+
+struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
+							unsigned long flags)
+{
+	return dev->bm->get_blk(dev, lun, flags);
+}
+EXPORT_SYMBOL(nvm_get_blk);
+
+/* Assumes that all valid pages have already been moved on release to bm */
+void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
+{
+	return dev->bm->put_blk(dev, blk);
+}
+EXPORT_SYMBOL(nvm_put_blk);
 
 int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_rq *rqdata,
 						struct nvm_target_instance *ins)
