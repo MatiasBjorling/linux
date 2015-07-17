@@ -416,6 +416,14 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 		cpu_to_le64(nvme_block_nr(ns, rqdata->phys_sector));
 }
 
+void nvme_nvm_end_io(struct request *rq, int error)
+{
+	struct nvm_rq *rqdata = rq->end_io_data;
+	struct nvm_target_instance *ins = rqdata->ins;
+
+	ins->end_io(rq->end_io_data, error);
+}
+
 static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 							struct nvm_rq *rqdata)
 {
