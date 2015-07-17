@@ -79,6 +79,7 @@ struct nvm_target_instance {
 
 struct nvm_rq {
 	struct nvm_target_instance *ins;
+	struct bio *bio;
 	sector_t phys_sector;
 };
 
@@ -212,8 +213,9 @@ struct nvm_rev_addr {
 	sector_t addr;
 };
 
-typedef void (nvm_tgt_make_rq)(struct request_queue *, struct bio *);
-typedef sector_t (nvm_tgt_capacity)(void *);
+typedef void (nvm_tgt_make_rq_fn)(struct request_queue *, struct bio *);
+typedef sector_t (nvm_tgt_capacity_fn)(void *);
+typedef void (nvm_tgt_end_io_fn)(struct nvm_rq *, int);
 typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
 
@@ -222,8 +224,9 @@ struct nvm_target_type {
 	unsigned int version[3];
 
 	/* target entry points */
-	nvm_tgt_make_rq *make_rq;
-	nvm_tgt_capacity *capacity;
+	nvm_tgt_make_rq_fn *make_rq;
+	nvm_tgt_capacity_fn *capacity;
+	nvm_tgt_end_io_fn *end_io;
 
 	/* module-specific init/teardown */
 	nvm_tgt_init_fn *init;
@@ -245,7 +248,8 @@ typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct bio *,
-	     struct nvm_rq *, struct nvm_target_instance *);
+				  struct nvm_rq *);
+typedef void (nvm_bm_end_io_fn)(struct nvm_rq *, int);
 typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
 	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
@@ -269,6 +273,7 @@ struct nvm_bm_type {
 	nvm_bm_flush_blk_fn *flush_blk;
 
 	nvm_bm_submit_io_fn *submit_io;
+	nvm_bm_end_io_fn *end_io;
 	nvm_bm_erase_blk_fn *erase_blk;
 
 	/* State management for debugging purposes */
@@ -295,8 +300,8 @@ extern int nvm_register(struct request_queue *, struct gendisk *,
 							struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
 
-extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *rqdata,
-			struct nvm_target_instance *);
+extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *,
+						struct nvm_target_instance *);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 
