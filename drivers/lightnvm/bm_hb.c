@@ -317,7 +317,7 @@ static int hb_submit_io(struct nvm_dev *dev, struct bio *bio,
 
 static void hb_end_io(struct nvm_rq *rqdata, int error)
 {
-	struct nvm_target_instance *ins = rqdata->ins;
+	struct nvm_tgt_instance *ins = rqdata->ins;
 	ins->tt->end_io(rqdata, error);
 }
 
