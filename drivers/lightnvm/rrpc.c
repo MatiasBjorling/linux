@@ -538,11 +538,10 @@ err:
 	return NULL;
 }
 
-//TODO: JAVIER: send rqdata in private
-static void rrpc_unprep_rq(struct request *rq, struct nvm_rq *rqdata,
-								void *private)
+static void rrpc_unprep_rq(struct request *rq, void *private)
 {
-	struct rrpc *rrpc = private;
+	struct nvm_rq *rqdata = private;
+	struct rrpc *rrpc = (void*)rqdata->ins;
 	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
 	struct nvm_addr *p = t_rqdata->addr;
 	struct nvm_block *block = p->block;
