@@ -417,8 +417,7 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 }
 
 static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
-			struct nvm_ppalist *ppa,
-			struct nvm_target_instance *ins, unsigned long flags)
+			struct nvm_target_instance *ins, struct nvm_rq *rqdata)
 {
 	struct request *rq;
 
@@ -435,8 +434,10 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
-	rq->sense = ins;
-	rq->cmd = (char *)flags;
+
+	/* TODO: Pache it in rrpc already*/
+	rqdata->ins = ins;
+	rq->sense = rqdata;
 
 	blk_execute_rq_nowait(q, NULL, rq, 0, NULL);
 
