@@ -401,10 +401,10 @@ out:
 }
 
 void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
-			struct nvme_command *c, struct nvme_iod *iod)
+							struct nvme_command *c)
 {
 	struct nvme_nvm_command *cc = (struct nvme_nvm_command *)c;
-	struct nvm_rq *rqdata = &iod->nvmrq;
+	struct nvm_rq *rqdata = rq->end_io_data;
 
 	cc->nvm_hb_rw.opcode = (rq_data_dir(rq) ?
 				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
@@ -485,7 +485,7 @@ int nvme_nvm_register(struct request_queue *q, struct gendisk *disk)
 }
 #else
 void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
-			struct nvme_command *c, struct nvme_iod *iod)
+							struct nvme_command *c)
 {
 }
 

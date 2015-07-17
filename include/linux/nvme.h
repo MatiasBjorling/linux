@@ -173,6 +173,6 @@ int nvme_sg_get_version_num(int __user *ip);
 
 int nvme_nvm_register(struct request_queue *q, struct gendisk *disk);
 void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
-				struct nvme_command *c, struct nvme_iod *iod);
+							struct nvme_command *c);
 
 #endif /* _LINUX_NVME_H */
