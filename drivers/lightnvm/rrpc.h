@@ -214,18 +214,6 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 	spin_unlock_irqrestore(&map->lock, flags);
 }
 
-static inline void rrpc_unlock_rq_from_bio(struct rrpc *rrpc, struct request *rq,
-							struct nvm_rq *rqdata)
-{
-	sector_t laddr = blk_rq_pos(rq) / NR_PHY_IN_LOG;
-	unsigned int pages = blk_rq_bytes(rq) / EXPOSED_PAGE_SIZE;
-	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
-
-	BUG_ON((laddr + pages) > rrpc->nr_pages);
-
-	rrpc_unlock_laddr(rrpc, laddr, r);
-}
-
 static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct bio *bio,
 							struct nvm_rq *rqdata)
 {
