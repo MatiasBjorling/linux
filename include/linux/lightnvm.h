@@ -296,7 +296,7 @@ extern int nvm_register(struct request_queue *, struct gendisk *,
 extern void nvm_unregister(struct gendisk *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *rqdata,
-			struct nvm_target_instance *, unsigned long flags);
+			struct nvm_target_instance *);
 extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 
