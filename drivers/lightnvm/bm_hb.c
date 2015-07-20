@@ -336,14 +336,14 @@ static struct nvm_lun *hb_get_luns(struct nvm_dev *dev, int begin, int end)
 	return bm->luns + begin;
 }
 
-static void hb_free_blocks_print(struct nvm_dev *dev, char *page)
+static void hb_free_blocks_print(struct nvm_dev *dev)
 {
 	struct bm_hb *bm = dev->bmp;
 	struct nvm_lun *lun;
 	unsigned int i;
 
 	bm_for_each_lun(dev, bm, lun, i)
-		page += sprintf(page, "%8u\t%u\n", i, lun->nr_free_blocks);
+		printk("%s: lun%8u\t%u\n", dev->name, i, lun->nr_free_blocks);
 }
 
 static struct nvm_bm_type bm_hb = {
