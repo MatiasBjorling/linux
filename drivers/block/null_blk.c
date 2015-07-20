@@ -471,18 +471,15 @@ static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
 	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
 	disk->major		= null_major;
 	disk->first_minor	= nullb->index;
-	disk->fops		= &null_fops;
-	disk->private_data	= nullb;
 	disk->queue		= nullb->q;
 
 	sprintf(disk->disk_name, "nullb%d", nullb->index);
 
-	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops);
+	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops, NULL);
 	if (ret)
 		return ret;
-	add_disk(disk);
 
-	nvm_attach_sysfs(disk);
+	add_disk(disk);
 
 	return 0;
 }
