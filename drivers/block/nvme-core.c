@@ -2105,7 +2105,6 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 
 	disk->queue = ns->queue;
 	add_disk(ns->disk);
-	nvm_attach_sysfs(ns->disk);
 	if (ns->ms)
 		revalidate_disk(ns->disk);
 	return;
