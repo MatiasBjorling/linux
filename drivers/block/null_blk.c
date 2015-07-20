@@ -18,7 +18,6 @@ struct nullb_cmd {
 	struct bio *bio;
 	unsigned int tag;
 	struct nullb_queue *nq;
-	struct nvm_rq nvmrq;
 };
 
 struct nullb_queue {
@@ -459,22 +458,6 @@ static int null_queue_rq(struct blk_mq_hw_ctx *hctx,
 
 	cmd->rq = bd->rq;
 	cmd->nq = hctx->driver_data;
-
-	if (nvm_enable) {
-		nvm_init_rq_data(&cmd->nvmrq);
-		/* switch (nvm_prep_rq(cmd->rq, &cmd->nvmrq)) { */
-		/* case NVM_PREP_DONE: */
-		/* 	return BLK_MQ_RQ_QUEUE_OK; */
-		/* case NVM_PREP_REQUEUE: */
-		/* 	blk_mq_requeue_request(bd->rq); */
-		/* 	blk_mq_kick_requeue_list(hctx->queue); */
-		/* 	return BLK_MQ_RQ_QUEUE_OK; */
-		/* case NVM_PREP_BUSY: */
-		/* 	return BLK_MQ_RQ_QUEUE_BUSY; */
-		/* case NVM_PREP_ERROR: */
-		/* 	return BLK_MQ_RQ_QUEUE_ERROR; */
-		/* } */
-	}
 
 	blk_mq_start_request(bd->rq);
 
