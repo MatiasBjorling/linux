@@ -184,7 +184,7 @@ static void rrpc_end_sync_bio(struct bio *bio, int error)
  */
 static int rrpc_move_valid_pages(struct rrpc *rrpc, struct nvm_block *block)
 {
-	struct request_queue *q = rrpc->q_dev;
+	struct request_queue *q = rrpc->dev->q;
 	struct nvm_lun *lun = block->lun;
 	struct nvm_rev_addr *rev;
 	struct nvm_rq *rqdata;
@@ -280,7 +280,7 @@ static void rrpc_block_gc(struct work_struct *work)
 									ws_gc);
 	struct rrpc *rrpc = gcb->rrpc;
 	struct nvm_block *block = gcb->block;
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 
 	pr_debug("nvm: block '%d' being reclaimed\n", block->id);
 
@@ -498,14 +498,14 @@ static struct nvm_addr *rrpc_map_page(struct rrpc *rrpc, sector_t laddr,
 	p_addr = nvm_alloc_addr(p_block);
 
 	if (p_addr == ADDR_EMPTY) {
-		p_block = nvm_get_blk(rrpc->q_nvm, lun, 0);
+		p_block = nvm_get_blk(rrpc->dev, lun, 0);
 
 		if (!p_block) {
 			if (is_gc) {
 				p_addr = nvm_alloc_addr(rlun->gc_cur);
 				if (p_addr == ADDR_EMPTY) {
 					p_block =
-					       nvm_get_blk(rrpc->q_nvm, lun, 1);
+					       nvm_get_blk(rrpc->dev, lun, 1);
 					if (!p_block) {
 						pr_err("rrpc: no more blocks");
 						goto finished;
@@ -683,7 +683,7 @@ static void rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 							rqdata_ins, flags_ins);
 		}
 
-		if (nvm_submit_io(rrpc_ins->q_nvm, bio_ins, rqdata_ins,
+		if (nvm_submit_io(rrpc_ins->dev, bio_ins, rqdata_ins,
 						&rrpc_ins->instance)) {
 			pr_err("rrpc: io submission failed");
 			goto free;
@@ -780,7 +780,7 @@ static void rrpc_map_free(struct rrpc *rrpc)
 static int rrpc_l2p_update(u64 slba, u64 nlb, u64 *entries, void *private)
 {
 	struct rrpc *rrpc = (struct rrpc *)private;
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 	struct nvm_addr *addr = rrpc->trans_map + slba;
 	struct nvm_rev_addr *raddr = rrpc->rev_trans_map;
 	sector_t max_pages = dev->total_pages * (dev->sector_size >> 9);
@@ -816,7 +816,7 @@ static int rrpc_l2p_update(u64 slba, u64 nlb, u64 *entries, void *private)
 
 static int rrpc_map_init(struct rrpc *rrpc)
 {
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 	sector_t i;
 	int ret;
 
@@ -888,7 +888,7 @@ static int rrpc_core_init(struct rrpc *rrpc)
 	if (!rrpc->page_pool)
 		return -ENOMEM;
 
-	rrpc->gcb_pool = mempool_create_slab_pool(rrpc->q_nvm->nr_luns,
+	rrpc->gcb_pool = mempool_create_slab_pool(rrpc->dev->nr_luns,
 								_gcb_cache);
 	if (!rrpc->gcb_pool)
 		return -ENOMEM;
@@ -939,7 +939,7 @@ static void rrpc_luns_free(struct rrpc *rrpc)
 
 static int rrpc_luns_init(struct rrpc *rrpc, int lun_begin, int lun_end)
 {
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 	struct nvm_lun *luns;
 	struct nvm_block *block;
 	struct rrpc_lun *rlun;
@@ -1003,8 +1003,10 @@ static void rrpc_free(struct rrpc *rrpc)
 static void rrpc_exit(void *private)
 {
 	struct rrpc *rrpc = private;
+	struct block_device *bdev;
 
-	blkdev_put(rrpc->q_bdev, FMODE_WRITE | FMODE_READ);
+	bdev = bdget_disk(rrpc->dev->disk, 0);
+	blkdev_put(bdev, FMODE_WRITE | FMODE_READ);
 	del_timer(&rrpc->gc_timer);
 
 	flush_workqueue(rrpc->krqd_wq);
@@ -1016,7 +1018,7 @@ static void rrpc_exit(void *private)
 static sector_t rrpc_capacity(void *private)
 {
 	struct rrpc *rrpc = private;
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 	sector_t reserved;
 
 	/* cur, gc, and two emergency blocks for each lun */
@@ -1062,7 +1064,7 @@ static void rrpc_block_map_update(struct rrpc *rrpc, struct nvm_block *block)
 
 static int rrpc_blocks_init(struct rrpc *rrpc)
 {
-	struct nvm_dev *dev = rrpc->q_nvm;
+	struct nvm_dev *dev = rrpc->dev;
 	struct nvm_lun *lun, *luns;
 	struct nvm_block *blk;
 	sector_t lun_iter, blk_iter;
@@ -1092,14 +1094,14 @@ static int rrpc_luns_configure(struct rrpc *rrpc)
 	for (i = 0; i < rrpc->nr_luns; i++) {
 		rlun = &rrpc->luns[i];
 
-		blk = nvm_get_blk(rrpc->q_nvm, rlun->parent, 0);
+		blk = nvm_get_blk(rrpc->dev, rlun->parent, 0);
 		if (!blk)
 			return -EINVAL;
 
 		rrpc_set_lun_cur(rlun, blk);
 
 		/* Emergency gc block */
-		blk = nvm_get_blk(rrpc->q_nvm, rlun->parent, 1);
+		blk = nvm_get_blk(rrpc->dev, rlun->parent, 1);
 		if (!blk)
 			return -EINVAL;
 		rlun->gc_cur = blk;
@@ -1110,28 +1112,20 @@ static int rrpc_luns_configure(struct rrpc *rrpc)
 
 static struct nvm_tgt_type tt_rrpc;
 
-static void *rrpc_init(struct gendisk *bdisk, struct gendisk *tdisk,
+static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 						int lun_begin, int lun_end)
 {
-	struct request_queue *bqueue = bdisk->queue;
+	struct request_queue *bqueue = dev->q;
 	struct request_queue *tqueue = tdisk->queue;
-	struct nvm_dev *dev;
 	struct block_device *bdev;
 	struct rrpc *rrpc;
 	int ret;
 
-	if (!nvm_get_dev(bdisk)) {
-		pr_err("nvm: block device not supported.\n");
-		return ERR_PTR(-EINVAL);
-	}
-
-	bdev = bdget_disk(bdisk, 0);
+	bdev = bdget_disk(dev->disk, 0);
 	if (blkdev_get(bdev, FMODE_WRITE | FMODE_READ, NULL)) {
 		pr_err("nvm: could not access backing device\n");
 		return ERR_PTR(-EINVAL);
 	}
-
-	dev = nvm_get_dev(bdisk);
 
 	rrpc = kzalloc(sizeof(struct rrpc), GFP_KERNEL);
 	if (!rrpc) {
@@ -1139,9 +1133,7 @@ static void *rrpc_init(struct gendisk *bdisk, struct gendisk *tdisk,
 		goto err;
 	}
 
-	rrpc->q_dev = bqueue;
-	rrpc->q_nvm = bdisk->nvm;
-	rrpc->q_bdev = bdev;
+	rrpc->dev = dev;
 	rrpc->nr_luns = lun_end - lun_begin + 1;
 	rrpc->instance.tt = &tt_rrpc;
 
