@@ -360,8 +360,22 @@ static void null_request_fn(struct request_queue *q)
 	}
 }
 
-#ifdef CONFIG_NVM
+static int null_open(struct block_device *bdev, fmode_t mode)
+{
+	return 0;
+}
 
+static void null_release(struct gendisk *disk, fmode_t mode)
+{
+}
+
+static const struct block_device_operations null_fops = {
+	.owner =	THIS_MODULE,
+	.open =		null_open,
+	.release =	null_release,
+};
+
+#ifdef CONFIG_NVM
 static int null_nvm_id(struct request_queue *q, struct nvm_id *id)
 {
 	sector_t size = gb * 1024 * 1024 * 1024ULL;
@@ -447,8 +461,44 @@ static struct nvm_dev_ops null_nvm_dev_ops = {
 	.get_features	= null_nvm_get_features,
 	.submit_io	= null_nvm_submit_io,
 };
+
+static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
+{
+	int ret;
+
+	set_capacity(disk, 0);
+
+	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
+	disk->major		= null_major;
+	disk->first_minor	= nullb->index;
+	disk->fops		= &null_fops;
+	disk->private_data	= nullb;
+	disk->queue		= nullb->q;
+
+	sprintf(disk->disk_name, "nullb%d", nullb->index);
+
+	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops);
+	if (ret)
+		return ret;
+	add_disk(disk);
+
+	nvm_attach_sysfs(disk);
+
+	return 0;
+}
+
+static void null_nvm_del_disk(struct gendisk *disk)
+{
+	nvm_unregister(disk);
+
+	del_gendisk(disk);
+}
 #else
-static struct nvm_dev_ops null_nvm_dev_ops;
+static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
+{
+	return -EINVAL;
+}
+static void null_nvm_del_disk(struct gendisk *disk) { }
 #endif /* CONFIG_NVM */
 
 static int null_queue_rq(struct blk_mq_hw_ctx *hctx,
@@ -498,30 +548,17 @@ static void null_del_dev(struct nullb *nullb)
 {
 	list_del_init(&nullb->list);
 
-	del_gendisk(nullb->disk);
+	if (nvm_enable)
+		null_nvm_del_disk(nullb->disk);
+	else
+		del_gendisk(nullb->disk);
+
 	blk_cleanup_queue(nullb->q);
 	if (queue_mode == NULL_Q_MQ)
 		blk_mq_free_tag_set(&nullb->tag_set);
-	if (nvm_enable)
-		nvm_unregister(nullb->disk);
 	put_disk(nullb->disk);
 	kfree(nullb);
 }
-
-static int null_open(struct block_device *bdev, fmode_t mode)
-{
-	return 0;
-}
-
-static void null_release(struct gendisk *disk, fmode_t mode)
-{
-}
-
-static const struct block_device_operations null_fops = {
-	.owner =	THIS_MODULE,
-	.open =		null_open,
-	.release =	null_release,
-};
 
 static int setup_commands(struct nullb_queue *nq)
 {
@@ -596,11 +633,27 @@ static int init_driver_queues(struct nullb *nullb)
 	return 0;
 }
 
+static void null_add_disk(struct nullb *nullb, struct gendisk *disk)
+{
+	sector_t size = gb * 1024 * 1024 * 1024ULL;
+
+	set_capacity(disk, size >> 9);
+
+	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
+	disk->major		= null_major;
+	disk->first_minor	= nullb->index;
+	disk->fops		= &null_fops;
+	disk->private_data	= nullb;
+	disk->queue		= nullb->q;
+
+	sprintf(disk->disk_name, "nullb%d", nullb->index);
+	add_disk(disk);
+}
+
 static int null_add_dev(void)
 {
 	struct gendisk *disk;
 	struct nullb *nullb;
-	sector_t size;
 	int rv;
 
 	nullb = kzalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
@@ -623,11 +676,9 @@ static int null_add_dev(void)
 		nullb->tag_set.nr_hw_queues = submit_queues;
 		nullb->tag_set.queue_depth = hw_queue_depth;
 		nullb->tag_set.numa_node = home_node;
+		nullb->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
 		nullb->tag_set.cmd_size = sizeof(struct nullb_cmd);
 		nullb->tag_set.driver_data = nullb;
-
-		if (!nvm_enable)
-			nullb->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
 
 		rv = blk_mq_alloc_tag_set(&nullb->tag_set);
 		if (rv)
@@ -671,32 +722,20 @@ static int null_add_dev(void)
 		goto out_cleanup_blk_queue;
 	}
 
-	mutex_lock(&lock);
-	nullb->index = nullb_indexes++;
-	list_add_tail(&nullb->list, &nullb_list);
-	mutex_unlock(&lock);
-
 	blk_queue_logical_block_size(nullb->q, bs);
 	blk_queue_physical_block_size(nullb->q, bs);
 
-	if (nvm_enable && nvm_register(nullb->q, disk, &null_nvm_dev_ops))
-		goto out_cleanup_disk;
+	if (nvm_enable) {
+		if (null_nvm_add_disk(nullb, disk))
+			goto out_cleanup_disk;
+	} else
+		null_add_disk(nullb, disk);
 
-	size = gb * 1024 * 1024 * 1024ULL;
+	mutex_lock(&lock);
+	list_add_tail(&nullb->list, &nullb_list);
+	nullb->index = nullb_indexes++;
+	mutex_unlock(&lock);
 
-	if (!nvm_enable)
-		set_capacity(disk, size >> 9);
-
-	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
-	disk->major		= null_major;
-	disk->first_minor	= nullb->index;
-	disk->fops		= &null_fops;
-	disk->private_data	= nullb;
-	disk->queue		= nullb->q;
-
-	sprintf(disk->disk_name, "nullb%d", nullb->index);
-	add_disk(disk);
-	nvm_attach_sysfs(disk);
 	return 0;
 
 out_cleanup_disk:
@@ -722,11 +761,6 @@ static int __init null_init(void)
 		pr_warn("null_blk: invalid block size\n");
 		pr_warn("null_blk: defaults block size to %lu\n", PAGE_SIZE);
 		bs = PAGE_SIZE;
-	}
-
-	if (nvm_enable && bs != 4096) {
-		pr_warn("null_blk: only 4K sectors are supported for Open-Channel SSDs. bs is set to 4K.\n");
-		bs = 4096;
 	}
 
 	if (queue_mode == NULL_Q_MQ && use_per_node_hctx) {
