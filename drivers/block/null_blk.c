@@ -676,7 +676,7 @@ static int null_add_dev(void)
 		nullb->tag_set.nr_hw_queues = submit_queues;
 		nullb->tag_set.queue_depth = hw_queue_depth;
 		nullb->tag_set.numa_node = home_node;
-		nullb->tag_set.cmd_size = sizeof(struct nullb_cmd);
+		nullb->tag_set.cmd_size	= sizeof(struct nullb_cmd);
 		nullb->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
 		nullb->tag_set.driver_data = nullb;
 
