@@ -352,11 +352,6 @@ static inline unsigned long nvm_get_rq_flags(struct request *rq)
 	return (unsigned long)rq->cmd;
 }
 
-static inline void nvm_init_rq_data(struct nvm_rq *rqdata)
-{
-	rqdata->phys_sector = 0;
-}
-
 #else /* CONFIG_NVM */
 
 struct nvm_dev_ops;
@@ -408,7 +403,6 @@ static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
 {
 	return NULL;
 }
-static inline void nvm_init_rq_data(struct nvm_rq *rqdata) { }
 static inline int nvm_attach_sysfs(struct gendisk *dev) { return 0; }
 
 
