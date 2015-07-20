@@ -409,7 +409,6 @@ static inline void iod_init(struct nvme_iod *iod, unsigned nbytes,
 	iod->npages = -1;
 	iod->length = nbytes;
 	iod->nents = 0;
-	nvm_init_rq_data(&iod->nvmrq);
 }
 
 static struct nvme_iod *
