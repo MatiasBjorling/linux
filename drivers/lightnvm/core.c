@@ -26,11 +26,13 @@
 #include <linux/types.h>
 #include <linux/sem.h>
 #include <linux/bitmap.h>
+#include <linux/module.h>
 
 #include <linux/lightnvm.h>
 
 static LIST_HEAD(_targets);
 static LIST_HEAD(_bms);
+static LIST_HEAD(_devices);
 static DECLARE_RWSEM(_lock);
 
 struct nvm_tgt_type *nvm_find_target_type(const char *name)
@@ -106,6 +108,18 @@ void nvm_unregister_bm(struct nvm_bm_type *bt)
 	up_write(&_lock);
 }
 EXPORT_SYMBOL(nvm_unregister_bm);
+
+struct nvm_dev *nvm_find_nvm_dev(const char *name)
+{
+	struct nvm_dev *dev;
+
+	list_for_each_entry(dev, &_devices, devices)
+		if (!strcmp(name, dev->name))
+			return dev;
+
+	return NULL;
+}
+
 
 sector_t nvm_alloc_addr(struct nvm_block *block)
 {
@@ -300,11 +314,9 @@ static const struct block_device_operations nvm_fops = {
 	.release	= nvm_release,
 };
 
-static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
+static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 						int lun_begin, int lun_end)
 {
-	struct request_queue *qqueue = bdisk->queue;
-	struct nvm_dev *qnvm = bdisk->nvm;
 	struct request_queue *tqueue;
 	struct gendisk *tdisk;
 	struct nvm_tgt_type *tt;
@@ -318,7 +330,7 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	}
 
 	down_write(&_lock);
-	list_for_each_entry(t, &qnvm->online_targets, list) {
+	list_for_each_entry(t, &dev->online_targets, list) {
 		if (!strcmp(tname, t->disk->disk_name)) {
 			pr_err("nvm: target name already exists.\n");
 			up_write(&_lock);
@@ -331,7 +343,7 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	if (!t)
 		return -ENOMEM;
 
-	tqueue = blk_alloc_queue_node(GFP_KERNEL, qqueue->node);
+	tqueue = blk_alloc_queue_node(GFP_KERNEL, dev->q->node);
 	if (!tqueue)
 		goto err_t;
 	blk_queue_make_request(tqueue, tt->make_rq);
@@ -347,7 +359,7 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	tdisk->fops = &nvm_fops;
 	tdisk->queue = tqueue;
 
-	targetdata = tt->init(bdisk, tdisk, lun_begin, lun_end);
+	targetdata = tt->init(dev, tdisk, lun_begin, lun_end);
 	if (IS_ERR(targetdata))
 		goto err_init;
 
@@ -364,7 +376,7 @@ static int nvm_create_target(struct gendisk *bdisk, char *ttname, char *tname,
 	t->disk = tdisk;
 
 	down_write(&_lock);
-	list_add_tail(&t->list, &qnvm->online_targets);
+	list_add_tail(&t->list, &dev->online_targets);
 	up_write(&_lock);
 
 	return 0;
@@ -387,6 +399,7 @@ static void nvm_remove_target(struct nvm_target *t)
 	del_gendisk(tdisk);
 	if (tt->exit)
 		tt->exit(tdisk->private_data);
+
 	blk_cleanup_queue(q);
 
 	put_disk(tdisk);
@@ -395,72 +408,25 @@ static void nvm_remove_target(struct nvm_target *t)
 	kfree(t);
 }
 
-static ssize_t free_blocks_show(struct device *d, struct device_attribute *attr,
-		char *page)
+static int nvm_configure_show(struct nvm_dev *dev, const char *val)
 {
-	struct gendisk *disk = dev_to_disk(d);
-	struct nvm_dev *dev = disk->nvm;
-	char *page_start = page;
+	if (!dev->bm)
+		return 0;
 
-	if (dev->bm)
-		dev->bm->free_blocks_print(dev, page);
+	dev->bm->free_blocks_print(dev);
 
-	return page - page_start;
+	return 0;
 }
 
-DEVICE_ATTR_RO(free_blocks);
-
-static ssize_t configure_store(struct device *d, struct device_attribute *attr,
-						const char *buf, size_t cnt)
+static int nvm_configure_del(struct nvm_dev *dev, const char *val)
 {
-	struct gendisk *disk = dev_to_disk(d);
-	struct nvm_dev *dev = disk->nvm;
-	char name[255], ttname[255];
-	int lun_begin, lun_end, ret;
-
-	if (cnt >= 255)
-		return -EINVAL;
-
-	if (!dev->bm) {
-		pr_err("nvm: no bm backend configured for this device.\n");
-		return -EINVAL;
-	}
-
-	ret = sscanf(buf, "%s %s %u:%u", name, ttname, &lun_begin, &lun_end);
-	if (ret != 4) {
-		pr_err("nvm: configure must be in the format of \"name targetname lun_begin:lun_end\".\n");
-		return -EINVAL;
-	}
-
-	if (lun_begin > lun_end || lun_end > dev->nr_luns) {
-		pr_err("nvm: lun out of bound (%u:%u > %u)\n",
-					lun_begin, lun_end, dev->nr_luns);
-		return -EINVAL;
-	}
-
-	ret = nvm_create_target(disk, name, ttname, lun_begin, lun_end);
-	if (ret)
-		pr_err("nvm: configure disk failed\n");
-
-	return cnt;
-}
-DEVICE_ATTR_WO(configure);
-
-static ssize_t remove_store(struct device *d, struct device_attribute *attr,
-						const char *buf, size_t cnt)
-{
-	struct gendisk *disk = dev_to_disk(d);
-	struct nvm_dev *dev = disk->nvm;
 	struct nvm_target *t = NULL;
-	char tname[255];
+	char opcode, devname[DISK_NAME_LEN], tname[255];
 	int ret;
 
-	if (cnt >= 255)
-		return -EINVAL;
-
-	ret = sscanf(buf, "%s", tname);
-	if (ret != 1) {
-		pr_err("nvm: remove use the following format \"targetname\".\n");
+	ret = sscanf(val, "%c %s %s", &opcode, devname, tname);
+	if (ret != 3) {
+		pr_err("nvm: target name could not be read.\n");
 		return -EINVAL;
 	}
 
@@ -474,86 +440,133 @@ static ssize_t remove_store(struct device *d, struct device_attribute *attr,
 	}
 	up_write(&_lock);
 
-	if (ret)
+	if (ret) {
 		pr_err("nvm: target \"%s\" doesn't exist.\n", tname);
-
-	return cnt;
-}
-DEVICE_ATTR_WO(remove);
-
-static struct attribute *nvm_attrs[] = {
-	&dev_attr_free_blocks.attr,
-	&dev_attr_configure.attr,
-	&dev_attr_remove.attr,
-	NULL,
-};
-
-static struct attribute_group nvm_attribute_group = {
-	.name = "lightnvm",
-	.attrs = nvm_attrs,
-};
-
-int nvm_attach_sysfs(struct gendisk *disk)
-{
-	struct device *dev = disk_to_dev(disk);
-	int ret;
-
-	if (!disk->nvm)
-		return 0;
-
-	ret = sysfs_update_group(&dev->kobj, &nvm_attribute_group);
-	if (ret)
-		return ret;
-
-	kobject_uevent(&dev->kobj, KOBJ_CHANGE);
+		return -EINVAL;
+	}
 
 	return 0;
 }
-EXPORT_SYMBOL(nvm_attach_sysfs);
 
-void nvm_remove_sysfs(struct gendisk *disk)
+static int nvm_configure_add(struct nvm_dev *dev, const char *val)
 {
-	struct device *dev = disk_to_dev(disk);
+	char opcode, devname[DISK_NAME_LEN], tgtengine[255], tname[255];
+	int lun_begin, lun_end, ret;
 
-	sysfs_remove_group(&dev->kobj, &nvm_attribute_group);
+	ret = sscanf(val, "%c %s %s %s %u:%u", &opcode, devname, tgtengine,
+						tname, &lun_begin, &lun_end);
+	if (ret != 6) {
+		pr_err("nvm: configure must be in the format of \"opcode device name tgtengine lun_begin:lun_end\".\n");
+		return -EINVAL;
+	}
+
+	if (lun_begin > lun_end || lun_end > dev->nr_luns) {
+		pr_err("nvm: lun out of bound (%u:%u > %u)\n",
+					lun_begin, lun_end, dev->nr_luns);
+		return -EINVAL;
+	}
+
+	return nvm_create_target(dev, tname, tgtengine, lun_begin, lun_end);
 }
 
-int nvm_register(struct request_queue *q, struct gendisk *disk,
-							struct nvm_dev_ops *ops)
+/* Exposes administrative interface through /sys/module/lnvm/configure_by_str */
+static int nvm_configure_by_str_event(const char *val,
+					const struct kernel_param *kp)
 {
-	struct nvm_dev *nvm;
+	struct nvm_dev *dev;
+	char opcode, devname[DISK_NAME_LEN];
+	int ret;
+
+	ret = sscanf(val, "%c %s", &opcode, devname);
+	if (ret != 2) {
+		pr_err("nvm: configure must be in the format of \"opcode device ...\"\n");
+		return -EINVAL;
+	}
+
+	dev = nvm_find_nvm_dev(devname);
+	if (!dev) {
+		pr_err("nvm: device not found\n");
+		return -EINVAL;
+	}
+
+	switch (opcode) {
+		case 'a':
+			return nvm_configure_add(dev, val);
+			break;
+		case 'd':
+			return nvm_configure_del(dev, val);
+			break;
+		case 's':
+			return nvm_configure_show(dev, val);
+			break;
+		default:
+			pr_err("nvm: invalid opcode.\n");
+			return -EINVAL;
+		break;
+	}
+
+	return 0;
+}
+
+static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
+	.set	= nvm_configure_by_str_event,
+	.get	= NULL,
+};
+
+#undef MODULE_PARAM_PREFIX
+#define MODULE_PARAM_PREFIX	"lnvm."
+
+module_param_cb(configure_debug, &nvm_configure_by_str_event_param_ops, NULL,
+									0644);
+
+
+int nvm_register(struct request_queue *q, struct gendisk *disk,
+							struct nvm_dev_ops *ops,
+							void *dev_private)
+{
+	struct nvm_dev *dev;
 	int ret;
 
 	if (!ops->identify || !ops->get_features)
 		return -EINVAL;
 
-	nvm = kzalloc(sizeof(struct nvm_dev), GFP_KERNEL);
-	if (!nvm)
+	dev = kzalloc(sizeof(struct nvm_dev), GFP_KERNEL);
+	if (!dev)
 		return -ENOMEM;
 
-	nvm->q = q;
-	nvm->ops = ops;
+	dev->q = q;
+	dev->ops = ops;
+	dev->dev_private = dev_private;
+	dev->disk = disk;
+	strncpy(dev->name, disk->disk_name, DISK_NAME_LEN);
 
-	ret = nvm_init(nvm);
+	disk->fops = &nvm_fops;
+	disk->private_data = dev;
+	sprintf(disk->disk_name, "lnvm/%s", dev->name);
+
+	ret = nvm_init(dev);
 	if (ret)
 		goto err_init;
 
-	disk->nvm = nvm;
+	down_write(&_lock);
+	list_add(&dev->devices, &_devices);
+	up_write(&_lock);
 
 	return 0;
 err_init:
-	kfree(nvm);
+	kfree(dev);
 	return ret;
 }
 EXPORT_SYMBOL(nvm_register);
 
 void nvm_unregister(struct gendisk *disk)
 {
-	if (!disk->nvm)
-		return;
+	struct nvm_dev *dev = disk->private_data;
 
-	nvm_remove_sysfs(disk);
+	nvm_exit(dev);
 
-	nvm_exit(disk->nvm);
+	down_write(&_lock);
+	list_del(&dev->devices);
+	up_write(&_lock);
 }
 EXPORT_SYMBOL(nvm_unregister);

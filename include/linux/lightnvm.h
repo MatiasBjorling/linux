@@ -96,7 +96,6 @@ static inline void *nvm_rq_to_pdu(struct nvm_rq *rqdata)
 struct nvm_block;
 
 extern void nvm_unregister(struct gendisk *);
-extern int nvm_attach_sysfs(struct gendisk *disk);
 
 typedef int (nvm_l2p_update_fn)(u64, u64, u64 *, void *);
 typedef int (nvm_bb_update_fn)(u32, void *, unsigned int, void *);
@@ -181,13 +180,15 @@ struct nvm_block {
 
 struct nvm_dev {
 	struct nvm_dev_ops *ops;
-	struct request_queue *q;
 
+	struct list_head devices;
 	struct list_head online_targets;
 
+	/* Block manager */
 	struct nvm_bm_type *bm;
 	void *bmp;
 
+	/* Target information */
 	int nr_luns;
 
 	/* Calculated/Cached values. These do not reflect the actual usable
@@ -198,8 +199,15 @@ struct nvm_dev {
 
 	uint32_t sector_size;
 
+	/* Identity */
 	struct nvm_id identity;
 	struct nvm_get_features features;
+
+	/* Backend device */
+	void *dev_private;
+	struct request_queue *q;
+	struct gendisk *disk;
+	char name[DISK_NAME_LEN];
 };
 
 /* Logical to physical mapping */
@@ -216,7 +224,7 @@ struct nvm_rev_addr {
 typedef void (nvm_tgt_make_rq_fn)(struct request_queue *, struct bio *);
 typedef sector_t (nvm_tgt_capacity_fn)(void *);
 typedef void (nvm_tgt_end_io_fn)(struct nvm_rq *, int);
-typedef void *(nvm_tgt_init_fn)(struct gendisk *, struct gendisk *, int, int);
+typedef void *(nvm_tgt_init_fn)(struct nvm_dev *, struct gendisk *, int, int);
 typedef void (nvm_tgt_exit_fn)(void *);
 
 struct nvm_tgt_type {
@@ -256,7 +264,7 @@ typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
 typedef int (nvm_bm_save_state_fn)(struct file *);
 typedef int (nvm_bm_restore_state_fn)(struct file *);
 typedef struct nvm_lun *(nvm_bm_get_luns_fn)(struct nvm_dev *, int, int);
-typedef void (nvm_bm_free_blocks_print_fn)(struct nvm_dev *, char *);
+typedef void (nvm_bm_free_blocks_print_fn)(struct nvm_dev *);
 
 struct nvm_bm_type {
 	const char *name;
@@ -297,7 +305,7 @@ extern void nvm_put_blk(struct nvm_dev *, struct nvm_block *);
 extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
 
 extern int nvm_register(struct request_queue *, struct gendisk *,
-							struct nvm_dev_ops *);
+						struct nvm_dev_ops *, void *);
 extern void nvm_unregister(struct gendisk *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *,
@@ -306,10 +314,6 @@ extern int nvm_prep_rq(struct request *, struct nvm_rq *);
 extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
 
 extern sector_t nvm_alloc_addr(struct nvm_block *);
-static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
-{
-	return disk->nvm;
-}
 
 #define lun_for_each_block(p, b, i) \
 		for ((i) = 0, b = &(p)->blocks[0]; \
@@ -373,7 +377,7 @@ static inline int nvm_register_target(struct nvm_tgt_type *tt)
 }
 static inline void nvm_unregister_target(struct nvm_tgt_type *tt) {}
 static inline int nvm_register(struct request_queue *q, struct gendisk *disk,
-							struct nvm_dev_ops *ops)
+				struct nvm_dev_ops *ops, void *dev_private)
 {
 	return -EINVAL;
 }
@@ -399,12 +403,6 @@ static inline sector_t nvm_alloc_addr(struct nvm_block *blk)
 {
 	return 0;
 }
-static inline struct nvm_dev *nvm_get_dev(struct gendisk *disk)
-{
-	return NULL;
-}
-static inline int nvm_attach_sysfs(struct gendisk *dev) { return 0; }
-
 
 #endif /* CONFIG_NVM */
 #endif /* LIGHTNVM.H */
