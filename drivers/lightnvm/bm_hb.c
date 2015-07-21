@@ -317,6 +317,7 @@ static int hb_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 static void hb_end_io(struct nvm_rq *rqd, int error)
 {
 	struct nvm_tgt_instance *ins = rqd->ins;
+
 	ins->tt->end_io(rqd, error);
 }
 
@@ -342,7 +343,7 @@ static void hb_free_blocks_print(struct nvm_dev *dev)
 	unsigned int i;
 
 	bm_for_each_lun(dev, bm, lun, i)
-		printk("%s: lun%8u\t%u\n", dev->name, i, lun->nr_free_blocks);
+		pr_info("%s: lun%8u\t%u\n", dev->name, i, lun->nr_free_blocks);
 }
 
 static struct nvm_bm_type bm_hb = {
