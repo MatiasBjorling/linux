@@ -164,7 +164,7 @@ struct nvme_nvm_id_chnl {
 	__le16			chnl_parallelism;
 	__u8			io_sched;
 	__u8			reserved[133];
-} __attribute__((packed));
+} __packed;
 
 struct nvme_nvm_id {
 	__u8			ver_id;
@@ -172,7 +172,7 @@ struct nvme_nvm_id {
 	__le16			nchannels;
 	__u8			reserved[252];
 	struct nvme_nvm_id_chnl	chnls[];
-} __attribute__((packed));
+} __packed;
 
 #define NVME_NVM_CHNLS_PR_REQ ((4096U - sizeof(struct nvme_nvm_id)) \
 					/ sizeof(struct nvme_nvm_id_chnl))
