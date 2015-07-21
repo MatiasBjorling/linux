@@ -404,7 +404,7 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 							struct nvme_command *c)
 {
 	struct nvme_nvm_command *cc = (struct nvme_nvm_command *)c;
-	struct nvm_rq *rqdata = rq->end_io_data;
+	struct nvm_rq *rqd = rq->end_io_data;
 
 	cc->nvm_hb_rw.opcode = (rq_data_dir(rq) ?
 				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read);
@@ -413,23 +413,23 @@ void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 	cc->nvm_hb_rw.length = cpu_to_le16(
 			(blk_rq_bytes(rq) >> ns->lba_shift) - 1);
 	cc->nvm_hb_rw.phys_addr =
-		cpu_to_le64(nvme_block_nr(ns, rqdata->phys_sector));
+		cpu_to_le64(nvme_block_nr(ns, rqd->phys_sector));
 }
 
 void nvme_nvm_end_io(struct request *rq, int error)
 {
-	struct nvm_rq *rqdata = rq->end_io_data;
-	struct nvm_tgt_instance *ins = rqdata->ins;
+	struct nvm_rq *rqd = rq->end_io_data;
+	struct nvm_tgt_instance *ins = rqd->ins;
 
 	ins->tt->end_io(rq->end_io_data, error);
 
 	blk_put_request(rq);
 }
 
-static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
-							struct nvm_rq *rqdata)
+static int nvme_nvm_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 {
 	struct request *rq;
+	struct bio *bio = rqd->bio;
 
 	rq = blk_mq_alloc_request(q, bio_rw(bio), GFP_KERNEL, 0);
 	if (IS_ERR(rq))
@@ -445,7 +445,7 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct bio *bio,
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
 
-	rq->end_io_data = rqdata;
+	rq->end_io_data = rqd;
 
 	blk_execute_rq_nowait(q, NULL, rq, 0, nvme_nvm_end_io);
 
