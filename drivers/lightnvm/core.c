@@ -487,19 +487,15 @@ static int nvm_configure_by_str_event(const char *val,
 	}
 
 	switch (opcode) {
-		case 'a':
-			return nvm_configure_add(dev, val);
-			break;
-		case 'd':
-			return nvm_configure_del(dev, val);
-			break;
-		case 's':
-			return nvm_configure_show(dev, val);
-			break;
-		default:
-			pr_err("nvm: invalid opcode.\n");
-			return -EINVAL;
-		break;
+	case 'a':
+		return nvm_configure_add(dev, val);
+	case 'd':
+		return nvm_configure_del(dev, val);
+	case 's':
+		return nvm_configure_show(dev, val);
+	default:
+		pr_err("nvm: invalid opcode.\n");
+		return -EINVAL;
 	}
 
 	return 0;
