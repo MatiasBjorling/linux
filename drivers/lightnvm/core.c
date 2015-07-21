@@ -153,12 +153,9 @@ void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
-int nvm_submit_io(struct nvm_dev *dev, struct bio *bio, struct nvm_rq *rqdata,
-						struct nvm_tgt_instance *ins)
+int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
-	rqdata->ins = ins;
-	rqdata->bio = bio;
-	return dev->ops->submit_io(dev->q, bio, rqdata);
+	return dev->ops->submit_io(dev->q, rqd);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 

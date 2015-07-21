@@ -2,11 +2,10 @@
 #define NVM_H
 
 enum {
-	NVM_PREP_OK = 0,
-	NVM_PREP_BUSY = 1,
-	NVM_PREP_REQUEUE = 2,
-	NVM_PREP_DONE = 3,
-	NVM_PREP_ERROR = 4,
+	NVM_IO_OK = 0,
+	NVM_IO_REQUEUE = 1,
+	NVM_IO_DONE = 2,
+	NVM_IO_ERR = 3,
 
 	NVM_IOTYPE_NONE = 0,
 	NVM_IOTYPE_GC = 1,
@@ -80,6 +79,7 @@ struct nvm_tgt_instance {
 struct nvm_rq {
 	struct nvm_tgt_instance *ins;
 	struct bio *bio;
+	unsigned long flags;
 	sector_t phys_sector;
 };
 
@@ -107,8 +107,7 @@ typedef int (nvm_get_l2p_tbl_fn)(struct request_queue *, u64, u64,
 				nvm_l2p_update_fn *, void *);
 typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
-typedef int (nvm_submit_io_fn)(struct request_queue *, struct bio *,
-							struct nvm_rq *);
+typedef int (nvm_submit_io_fn)(struct request_queue *, struct nvm_rq *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 
 struct nvm_dev_ops {
@@ -139,7 +138,6 @@ struct nvm_lun {
 					 * and ready for use */
 	struct list_head bb_list;	/* Bad blocks. Mutually exclusive with
 					   free_list and used_list */
-
 
 	struct {
 		spinlock_t lock;
@@ -255,8 +253,7 @@ typedef void (nvm_bm_put_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
-typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct bio *,
-				  struct nvm_rq *);
+typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct nvm_rq *);
 typedef void (nvm_bm_end_io_fn)(struct nvm_rq *, int);
 typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *);
 typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
@@ -308,10 +305,7 @@ extern int nvm_register(struct request_queue *, struct gendisk *,
 						struct nvm_dev_ops *, void *);
 extern void nvm_unregister(struct gendisk *);
 
-extern int nvm_submit_io(struct nvm_dev *, struct bio *, struct nvm_rq *,
-						struct nvm_tgt_instance *);
-extern int nvm_prep_rq(struct request *, struct nvm_rq *);
-extern void nvm_unprep_rq(struct request *, struct nvm_rq *);
+extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 
 extern sector_t nvm_alloc_addr(struct nvm_block *);
 
@@ -382,13 +376,6 @@ static inline int nvm_register(struct request_queue *q, struct gendisk *disk,
 	return -EINVAL;
 }
 static inline void nvm_unregister(struct gendisk *disk) {}
-static inline int nvm_prep_rq(struct request *rq, struct nvm_rq *rqdata)
-{
-	return -EINVAL;
-}
-static inline void nvm_unprep_rq(struct request *rq, struct nvm_rq *rqdata)
-{
-}
 static inline struct nvm_block *nvm_get_blk(struct nvm_dev *dev,
 				struct nvm_lun *lun, unsigned long flags)
 {
