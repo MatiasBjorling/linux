@@ -584,7 +584,7 @@ free_rqd:
 static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 							unsigned long flags)
 {
-	struct rrpc_rq *t_rqd = nvm_rq_to_pdu(rqd);
+	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
 	struct nvm_addr *gp;
@@ -603,7 +603,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 		return NVM_IO_DONE;
 	}
 
-	t_rqd->addr = gp;
+	rrqd->addr = gp;
 
 	return NVM_IO_OK;
 }
@@ -611,7 +611,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq *rqd, unsigned long flags)
 {
-	struct rrpc_rq *t_rqd = nvm_rq_to_pdu(rqd);
+	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	struct nvm_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
@@ -628,7 +628,7 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 	}
 
 	rqd->phys_sector = nvm_get_sector(p->addr);
-	t_rqd->addr = p;
+	rrqd->addr = p;
 
 	return NVM_IO_OK;
 }
