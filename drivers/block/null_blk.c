@@ -422,18 +422,18 @@ static int null_nvm_get_features(struct request_queue *q,
 
 static void null_nvm_end_io(struct request *rq, int error)
 {
-	struct nvm_rq *rqdata = rq->end_io_data;
-	struct nvm_tgt_instance *ins = rqdata->ins;
+	struct nvm_rq *rqd = rq->end_io_data;
+	struct nvm_tgt_instance *ins = rqd->ins;
 
 	ins->tt->end_io(rq->end_io_data, error);
 
 	blk_put_request(rq);
 }
 
-static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
-							struct nvm_rq *rqdata)
+static int null_nvm_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 {
 	struct request *rq;
+	struct bio *bio = rqd->bio;
 
 	rq = blk_mq_alloc_request(q, bio_rw(bio), GFP_KERNEL, 0);
 	if (IS_ERR(rq))
@@ -449,7 +449,7 @@ static int null_nvm_submit_io(struct request_queue *q, struct bio *bio,
 	rq->__data_len = bio->bi_iter.bi_size;
 	rq->bio = rq->biotail = bio;
 
-	rq->end_io_data = rqdata;
+	rq->end_io_data = rqd;
 
 	blk_execute_rq_nowait(q, NULL, rq, 0, null_nvm_end_io);
 
