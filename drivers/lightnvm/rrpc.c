@@ -16,12 +16,11 @@
 
 #include "rrpc.h"
 
-static struct kmem_cache *_gcb_cache, *_rq_cache, *_requeue_cache;
-static struct list_head rq_queue;
+static struct kmem_cache *_gcb_cache, *_rq_cache;
 static DECLARE_RWSEM(_lock);
 
-static void rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata, unsigned long flags);
+static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqd, unsigned long flags);
 
 #define rrpc_for_each_lun(rrpc, rlun, i) \
 		for ((i) = 0, rlun = &(rrpc)->luns[0]; \
@@ -70,49 +69,49 @@ static void rrpc_invalidate_range(struct rrpc *rrpc, sector_t slba,
 static struct nvm_rq *rrpc_inflight_laddr_acquire(struct rrpc *rrpc,
 					sector_t laddr, unsigned int pages)
 {
-	struct nvm_rq *rqdata;
+	struct nvm_rq *rqd;
 	struct rrpc_inflight_rq *inf;
 
-	rqdata = mempool_alloc(rrpc->rq_pool, GFP_ATOMIC);
-	if (!rqdata)
+	rqd = mempool_alloc(rrpc->rq_pool, GFP_ATOMIC);
+	if (!rqd)
 		return ERR_PTR(-ENOMEM);
 
-	inf = rrpc_get_inflight_rq(rqdata);
+	inf = rrpc_get_inflight_rq(rqd);
 	if (rrpc_lock_laddr(rrpc, laddr, pages, inf)) {
-		mempool_free(rqdata, rrpc->rq_pool);
+		mempool_free(rqd, rrpc->rq_pool);
 		return NULL;
 	}
 
-	return rqdata;
+	return rqd;
 }
 
-static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqdata)
+static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqd)
 {
-	struct rrpc_inflight_rq *inf = rrpc_get_inflight_rq(rqdata);
+	struct rrpc_inflight_rq *inf = rrpc_get_inflight_rq(rqd);
 
 	rrpc_unlock_laddr(rrpc, inf->l_start, inf);
 
-	mempool_free(rqdata, rrpc->rq_pool);
+	mempool_free(rqd, rrpc->rq_pool);
 }
 
 static void rrpc_discard(struct rrpc *rrpc, struct bio *bio)
 {
 	sector_t slba = bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 	sector_t len = bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
-	struct nvm_rq *rqdata;
+	struct nvm_rq *rqd;
 
 	do {
-		rqdata = rrpc_inflight_laddr_acquire(rrpc, slba, len);
+		rqd = rrpc_inflight_laddr_acquire(rrpc, slba, len);
 		schedule();
-	} while (!rqdata);
+	} while (!rqd);
 
-	if (IS_ERR(rqdata)) {
+	if (IS_ERR(rqd)) {
 		bio_io_error(bio);
 		return;
 	}
 
 	rrpc_invalidate_range(rrpc, slba, len);
-	rrpc_inflight_laddr_release(rrpc, rqdata);
+	rrpc_inflight_laddr_release(rrpc, rqd);
 }
 
 /* requires lun->lock taken */
@@ -187,7 +186,7 @@ static int rrpc_move_valid_pages(struct rrpc *rrpc, struct nvm_block *block)
 	struct request_queue *q = rrpc->dev->q;
 	struct nvm_lun *lun = block->lun;
 	struct nvm_rev_addr *rev;
-	struct nvm_rq *rqdata;
+	struct nvm_rq *rqd;
 	struct bio *bio;
 	struct page *page;
 	int slot;
@@ -222,8 +221,8 @@ try:
 			continue;
 		}
 
-		rqdata = rrpc_inflight_laddr_acquire(rrpc, rev->addr, 1);
-		if (IS_ERR_OR_NULL(rqdata)) {
+		rqd = rrpc_inflight_laddr_acquire(rrpc, rev->addr, 1);
+		if (IS_ERR_OR_NULL(rqd)) {
 			spin_unlock(&rrpc->rev_lock);
 			schedule();
 			goto try;
@@ -240,7 +239,11 @@ try:
 		/* TODO: may fail when EXP_PG_SIZE > PAGE_SIZE */
 		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
 
-		rrpc_submit_io(rrpc, bio, rqdata, NVM_IOTYPE_GC);
+		if (rrpc_submit_io(rrpc, bio, rqd, NVM_IOTYPE_GC)) {
+			pr_err("rrpc: gc read failed.\n");
+			rrpc_inflight_laddr_release(rrpc, rqd);
+			goto finished;
+		}
 		wait_for_completion_io(&wait);
 
 		bio_reset(bio);
@@ -255,14 +258,19 @@ try:
 
 		/* turn the command around and write the data back to a new
 		 * address */
-		rrpc_submit_io(rrpc, bio, rqdata, NVM_IOTYPE_GC);
+		if (rrpc_submit_io(rrpc, bio, rqd, NVM_IOTYPE_GC)) {
+			pr_err("rrpc: gc write failed.\n");
+			rrpc_inflight_laddr_release(rrpc, rqd);
+			goto finished;
+		}
 		wait_for_completion_io(&wait);
 
-		rrpc_inflight_laddr_release(rrpc, rqdata);
+		rrpc_inflight_laddr_release(rrpc, rqd);
 
 		bio_reset(bio);
 	}
 
+finished:
 	mempool_free(page, rrpc->page_pool);
 	bio_put(bio);
 
@@ -351,8 +359,7 @@ static void rrpc_lun_gc(struct work_struct *work)
 
 		BUG_ON(!block_is_full(block));
 
-		pr_debug("nvm: selected block '%d' as GC victim\n",
-								block->id);
+		pr_debug("rrpc: selected block '%d' for GC\n", block->id);
 
 		gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
 		if (!gcb)
@@ -420,7 +427,6 @@ static struct rrpc_lun *__rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
 	if (!is_gc)
 		return get_next_lun(rrpc);
 
-	/* FIXME */
 	/* during GC, we don't care about RR, instead we want to make
 	 * sure that we maintain evenness between the block luns. */
 	max_free = &rrpc->luns[0];
@@ -538,28 +544,27 @@ err:
 	return NULL;
 }
 
-static void rrpc_end_io(struct nvm_rq *rqdata, int error)
+static void rrpc_end_io(struct nvm_rq *rqd, int error)
 {
-	struct rrpc *rrpc = container_of(rqdata->ins, struct rrpc, instance);
-	struct rrpc_rq *rrqdata = nvm_rq_to_pdu(rqdata);
-	struct bio *bio = rqdata->bio;
-	struct nvm_addr *p = rrqdata->addr;
+	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
+	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
+	struct bio *bio = rqd->bio;
+	struct nvm_addr *p = rrqd->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
 	struct rrpc_block_gc *gcb;
+	int is_gc = rrqd->flags & NVM_IOTYPE_GC;
 	int cmnt_size;
-
-	rrpc_unlock_rq(rrpc, bio, rqdata);
 
 	if (bio_data_dir(bio) == WRITE) {
 		cmnt_size = atomic_inc_return(&block->data_cmnt_size);
 		if (likely(cmnt_size != lun->nr_pages_per_blk))
-			goto free_rqdata;
+			goto free_rqd;
 
 		gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
 		if (!gcb) {
-			pr_err("rrpc: not able to queue block for gc.");
-			goto free_rq_data_req;
+			pr_err("rrpc: unable to queue block for gc.");
+			goto free_rqd;
 		}
 
 		gcb->rrpc = rrpc;
@@ -569,167 +574,149 @@ static void rrpc_end_io(struct nvm_rq *rqdata, int error)
 		queue_work(rrpc->kgc_wq, &gcb->ws_gc);
 	}
 
-free_rq_data_req:
-	mempool_free(rrqdata->req_rq, rrpc->requeue_pool);
-free_rqdata:
-	mempool_free(rqdata, rrpc->rq_pool);
+free_rqd:
+	if (!is_gc) {
+		rrpc_unlock_rq(rrpc, bio, rqd);
+		mempool_free(rqd, rrpc->rq_pool);
+	}
 }
 
-static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata)
+static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
+							unsigned long flags)
 {
-	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
-	struct nvm_addr *gp;
+	struct rrpc_rq *t_rqd = nvm_rq_to_pdu(rqd);
+	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
+	struct nvm_addr *gp;
 
-	if (rrpc_lock_rq(rrpc, bio, rqdata))
-		return NVM_PREP_REQUEUE;
+	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
+		return NVM_IO_REQUEUE;
 
 	BUG_ON(!(l_addr >= 0 && l_addr < rrpc->nr_pages));
 	gp = &rrpc->trans_map[l_addr];
 
 	if (gp->block) {
-		rqdata->phys_sector = nvm_get_sector(gp->addr);
+		rqd->phys_sector = nvm_get_sector(gp->addr);
 	} else {
-		rrpc_unlock_rq(rrpc, bio, rqdata);
-		bio_endio(bio, 0);
-		return NVM_PREP_DONE;
+		BUG_ON(is_gc);
+		rrpc_unlock_rq(rrpc, bio, rqd);
+		return NVM_IO_DONE;
 	}
 
-	t_rqdata->addr = gp;
+	t_rqd->addr = gp;
 
-	return NVM_PREP_OK;
+	return NVM_IO_OK;
 }
 
-//TODO: JAVIER: The way you use flags (also in nvme-lightnvm) will change when
-//you update the GC to the new io flow
 static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata, unsigned long flags)
+				struct nvm_rq *rqd, unsigned long flags)
 {
-	struct rrpc_rq *t_rqdata = nvm_rq_to_pdu(rqdata);
+	struct rrpc_rq *t_rqd = nvm_rq_to_pdu(rqd);
 	struct nvm_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
 	sector_t l_addr = nvm_get_laddr(bio);
 
-	if (rrpc_lock_rq(rrpc, bio, rqdata))
-		return NVM_PREP_REQUEUE;
+	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
+		return NVM_IO_REQUEUE;
 
 	p = rrpc_map_page(rrpc, l_addr, is_gc);
 	if (!p) {
 		BUG_ON(is_gc);
-		rrpc_unlock_rq(rrpc, bio, rqdata);
+		rrpc_unlock_rq(rrpc, bio, rqd);
 		rrpc_gc_kick(rrpc);
-		return NVM_PREP_REQUEUE;
+		return NVM_IO_REQUEUE;
 	}
 
-	rqdata->phys_sector = nvm_get_sector(p->addr);
-	t_rqdata->addr = p;
+	rqd->phys_sector = nvm_get_sector(p->addr);
+	t_rqd->addr = p;
 
-	return NVM_PREP_OK;
+	return NVM_IO_OK;
 }
 
-static int rrpc_prep_rq(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata, unsigned long flags)
+static int rrpc_setup_rq(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqd, unsigned long flags)
 {
 	if (bio_rw(bio) == WRITE)
-		return rrpc_write_rq(rrpc, bio, rqdata, flags);
+		return rrpc_write_rq(rrpc, bio, rqd, flags);
 
-	return rrpc_read_rq(rrpc, bio, rqdata);
+	return rrpc_read_rq(rrpc, bio, rqd, flags);
 }
 
-static void rrpc_requeue_request(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata, unsigned long flags)
+static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
+				struct nvm_rq *rqd, unsigned long flags)
 {
-	struct rrpc_requeue_rq *req_rq;
-	struct rrpc_rq *rrqdata = nvm_rq_to_pdu(rqdata);
+	int err;
+	struct rrpc_rq *rrq = nvm_rq_to_pdu(rqd);
 
-	if (!rrqdata->req_rq) {
-		req_rq = mempool_alloc(rrpc->requeue_pool, GFP_KERNEL);
-		if (!req_rq) {
-			pr_err("rrpc: not able to requeue request.");
-			return;
-		}
+	err = rrpc_setup_rq(rrpc, bio, rqd, flags);
+	if (err)
+		return err;
 
-		rrqdata->req_rq = req_rq;
-	} else
-		req_rq = rrqdata->req_rq;
+	rqd->bio = bio;
+	rqd->ins = &rrpc->instance;
+	rrq->flags = flags;
 
-	req_rq->rrpc = rrpc;
-	req_rq->bio = bio;
-	req_rq->rqdata = rqdata;
-	req_rq->flags = flags;
+	err = nvm_submit_io(rrpc->dev, rqd);
+	if (err)
+		return NVM_IO_ERR;
 
-	list_add_tail(&req_rq->list, &rq_queue);
-}
-
-static void rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqdata, unsigned long flags)
-{
-	struct bio *bio_ins = bio;
-	struct nvm_rq *rqdata_ins = rqdata;
-	struct rrpc *rrpc_ins = rrpc;
-	struct rrpc_requeue_rq *req_rq;
-	unsigned long flags_ins = flags;
-
-	//XXX: Can we risk having an infinite loop here?
-	do {
-		switch (rrpc_prep_rq(rrpc, bio_ins, rqdata_ins, flags_ins)) {
-			case NVM_PREP_ERROR:
-				/*TODO: Signal error*/
-			case NVM_PREP_DONE:
-				goto free;
-			case NVM_PREP_REQUEUE:
-				rrpc_requeue_request(rrpc_ins, bio_ins,
-							rqdata_ins, flags_ins);
-		}
-
-		if (nvm_submit_io(rrpc_ins->dev, bio_ins, rqdata_ins,
-						&rrpc_ins->instance)) {
-			pr_err("rrpc: io submission failed");
-			goto free;
-		}
-
-		if (!list_empty(&rq_queue)) {
-			req_rq = list_first_entry(&rq_queue,
-						struct rrpc_requeue_rq, list);
-			list_del_init(&req_rq->list);
-
-			rrpc_ins = req_rq->rrpc;
-			bio_ins = req_rq->bio;
-			rqdata_ins = req_rq->rqdata;
-			flags_ins = req_rq->flags;
-		}
-	} while(!list_empty(&rq_queue));
-
-	return;
-
-free:
-	mempool_free(rqdata_ins, rrpc_ins->rq_pool);
+	return NVM_IO_OK;
 }
 
 static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 {
 	struct rrpc *rrpc = q->queuedata;
-	struct nvm_rq *rqdata;
-	struct rrpc_rq *rrqdata;
-	unsigned long flags = NVM_IOTYPE_NONE;
+	struct nvm_rq *rqd;
+	int err;
 
 	if (bio->bi_rw & REQ_DISCARD) {
 		rrpc_discard(rrpc, bio);
 		return;
 	}
 
-	rqdata = mempool_alloc(rrpc->rq_pool, GFP_KERNEL);
-	if (!rqdata) {
-		pr_err("rrpc: not able to queue new request.");
-		bio_endio(bio, -ENOMEM);
+	rqd = mempool_alloc(rrpc->rq_pool, GFP_KERNEL);
+	if (!rqd) {
+		pr_err_ratelimited("rrpc: not able to queue bio.");
+		bio_io_error(bio);
 		return;
 	}
 
-	rrqdata = nvm_rq_to_pdu(rqdata);
-	rrqdata->req_rq = NULL;
+	err = rrpc_submit_io(rrpc, bio, rqd, NVM_IOTYPE_NONE);
+	switch (err) {
+	case NVM_IO_OK:
+		return;
+	case NVM_IO_ERR:
+		bio_io_error(bio);
+		break;
+	case NVM_IO_DONE:
+		bio_endio(bio, 0);
+		break;
+	case NVM_IO_REQUEUE:
+		spin_lock(&rrpc->bio_lock);
+		bio_list_add(&rrpc->requeue_bios, bio);
+		spin_unlock(&rrpc->bio_lock);
+		queue_work(rrpc->kgc_wq, &rrpc->ws_requeue);
+		break;
+	}
 
-	rrpc_submit_io(rrpc, bio, rqdata, flags);
+	mempool_free(rqd, rrpc->rq_pool);
+}
+
+static void rrpc_requeue(struct work_struct *work)
+{
+	struct rrpc *rrpc = container_of(work, struct rrpc, ws_requeue);
+	struct bio_list bios;
+	struct bio *bio;
+
+	bio_list_init(&bios);
+
+	spin_lock(&rrpc->bio_lock);
+	bio_list_merge(&bios, &rrpc->requeue_bios);
+	bio_list_init(&rrpc->requeue_bios);
+	spin_unlock(&rrpc->bio_lock);
+
+	while ((bio = bio_list_pop(&bios)))
+		rrpc_make_rq(rrpc->disk->queue, bio);
 }
 
 static void rrpc_gc_free(struct rrpc *rrpc)
@@ -757,12 +744,12 @@ static void rrpc_gc_free(struct rrpc *rrpc)
 
 static int rrpc_gc_init(struct rrpc *rrpc)
 {
-	rrpc->krqd_wq = alloc_workqueue("knvm-work", WQ_MEM_RECLAIM|WQ_UNBOUND,
+	rrpc->krqd_wq = alloc_workqueue("rrpc-lun", WQ_MEM_RECLAIM|WQ_UNBOUND,
 						rrpc->nr_luns);
 	if (!rrpc->krqd_wq)
 		return -ENOMEM;
 
-	rrpc->kgc_wq = alloc_workqueue("knvm-gc", WQ_MEM_RECLAIM, 1);
+	rrpc->kgc_wq = alloc_workqueue("rrpc-bg", WQ_MEM_RECLAIM, 1);
 	if (!rrpc->kgc_wq)
 		return -ENOMEM;
 
@@ -873,13 +860,9 @@ static int rrpc_core_init(struct rrpc *rrpc)
 				sizeof(struct nvm_rq) + sizeof(struct rrpc_rq),
 				0, 0, NULL);
 		if (!_rq_cache) {
-			goto destroy_gcb_cache;
-		}
-
-		_requeue_cache = kmem_cache_create("rrpc_requeue",
-				sizeof(struct rrpc_requeue_rq), 0, 0, NULL);
-		if (!_requeue_cache) {
-			goto destroy_rq_cache;
+			kmem_cache_destroy(_gcb_cache);
+			up_write(&_lock);
+			return -ENOMEM;
 		}
 	}
 	up_write(&_lock);
@@ -897,10 +880,6 @@ static int rrpc_core_init(struct rrpc *rrpc)
 	if (!rrpc->rq_pool)
 		return -ENOMEM;
 
-	rrpc->requeue_pool = mempool_create_slab_pool(64, _requeue_cache);
-	if (!rrpc->requeue_pool)
-		return -ENOMEM;
-
 	for (i = 0; i < NVM_INFLIGHT_PARTITIONS; i++) {
 		struct nvm_inflight *map = &rrpc->inflight_map[i];
 
@@ -908,16 +887,7 @@ static int rrpc_core_init(struct rrpc *rrpc)
 		INIT_LIST_HEAD(&map->reqs);
 	}
 
-	INIT_LIST_HEAD(&rq_queue);
-
 	return 0;
-
-destroy_rq_cache:
-	kmem_cache_destroy(_rq_cache);
-destroy_gcb_cache:
-	kmem_cache_destroy(_gcb_cache);
-	up_write(&_lock);
-	return -ENOMEM;
 }
 
 static void rrpc_core_free(struct rrpc *rrpc)
@@ -928,8 +898,6 @@ static void rrpc_core_free(struct rrpc *rrpc)
 		mempool_destroy(rrpc->gcb_pool);
 	if (rrpc->rq_pool)
 		mempool_destroy(rrpc->rq_pool);
-	if (rrpc->requeue_pool)
-		mempool_destroy(rrpc->requeue_pool);
 }
 
 static void rrpc_luns_free(struct rrpc *rrpc)
@@ -1133,9 +1101,15 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 		goto err;
 	}
 
-	rrpc->dev = dev;
-	rrpc->nr_luns = lun_end - lun_begin + 1;
 	rrpc->instance.tt = &tt_rrpc;
+	rrpc->dev = dev;
+	rrpc->disk = tdisk;
+
+	bio_list_init(&rrpc->requeue_bios);
+	spin_lock_init(&rrpc->bio_lock);
+	INIT_WORK(&rrpc->ws_requeue, rrpc_requeue);
+
+	rrpc->nr_luns = lun_end - lun_begin + 1;
 
 	/* simple round-robin strategy */
 	atomic_set(&rrpc->next_lun, -1);
@@ -1180,7 +1154,7 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 		goto err;
 	}
 
-	/* make sure to inherit the size from the underlying device */
+	/* inherit the size from the underlying device */
 	blk_queue_logical_block_size(tqueue, queue_physical_block_size(bqueue));
 	blk_queue_max_hw_sectors(tqueue, queue_max_hw_sectors(bqueue));
 
@@ -1221,4 +1195,4 @@ static void rrpc_module_exit(void)
 module_init(rrpc_module_init);
 module_exit(rrpc_module_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Round-Robin Cost-based Hybrid Layer for Open-Channel SSDs");
+MODULE_DESCRIPTION("Hybrid Target for Open-Channel SSDs");

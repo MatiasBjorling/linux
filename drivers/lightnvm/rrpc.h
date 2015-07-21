@@ -33,14 +33,6 @@
 #define GC_LIMIT_INVERSE 10
 #define GC_TIME_SECS 100
 
-struct rrpc_requeue_rq {
-	struct rrpc *rrpc;
-	struct bio *bio;
-	struct nvm_rq *rqdata;
-	unsigned long flags;
-	struct list_head list;
-};
-
 struct nvm_inflight {
 	spinlock_t lock;
 	struct list_head reqs;
@@ -54,9 +46,8 @@ struct rrpc_inflight_rq {
 
 struct rrpc_rq {
 	struct rrpc_inflight_rq inflight_rq;
-	struct rrpc_requeue_rq *req_rq;
 	struct nvm_addr *addr;
-	unsigned int flags;
+	unsigned long flags;
 };
 
 struct rrpc_block {
@@ -81,6 +72,11 @@ struct rrpc {
 	struct nvm_tgt_instance instance;
 
 	struct nvm_dev *dev;
+	struct gendisk *disk;
+
+	struct bio_list requeue_bios;
+	spinlock_t bio_lock;
+	struct work_struct ws_requeue;
 
 	int nr_luns;
 	int lun_offset;
@@ -111,14 +107,10 @@ struct rrpc {
 	mempool_t *page_pool;
 	mempool_t *gcb_pool;
 	mempool_t *rq_pool;
-	mempool_t *requeue_pool;
 
 	struct timer_list gc_timer;
 	struct workqueue_struct *krqd_wq;
 	struct workqueue_struct *kgc_wq;
-
-	struct gc_blocks *gblks;
-	struct gc_luns *gluns;
 };
 
 struct rrpc_block_gc {
@@ -183,19 +175,19 @@ static inline int rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 	return __rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
 
-static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *rq)
+static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *rqd)
 {
-	struct rrpc_rq *rrq = nvm_rq_to_pdu(rq);
+	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 
-	return &rrq->inflight_rq;
+	return &rrqd->inflight_rq;
 }
 
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
-							struct nvm_rq *rqdata)
+							struct nvm_rq *rqd)
 {
 	sector_t laddr = nvm_get_laddr(bio);
 	unsigned int pages = nvm_get_pages(bio);
-	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 
 	return rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
@@ -213,11 +205,11 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 }
 
 static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct bio *bio,
-							struct nvm_rq *rqdata)
+							struct nvm_rq *rqd)
 {
 	sector_t laddr = nvm_get_laddr(bio);
 	unsigned int pages = nvm_get_pages(bio);
-	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqdata);
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 
 	BUG_ON((laddr + pages) > rrpc->nr_pages);
 
