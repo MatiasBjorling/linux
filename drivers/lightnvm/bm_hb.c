@@ -306,19 +306,18 @@ static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 	spin_unlock(&lun->lock);
 }
 
-static int hb_submit_io(struct nvm_dev *dev, struct bio *bio,
-							struct nvm_rq *rqdata)
+static int hb_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	if (!dev->ops->submit_io)
 		return 0;
 
-	return dev->ops->submit_io(dev->q, bio, rqdata);
+	return dev->ops->submit_io(dev->q, rqd);
 }
 
-static void hb_end_io(struct nvm_rq *rqdata, int error)
+static void hb_end_io(struct nvm_rq *rqd, int error)
 {
-	struct nvm_tgt_instance *ins = rqdata->ins;
-	ins->tt->end_io(rqdata, error);
+	struct nvm_tgt_instance *ins = rqd->ins;
+	ins->tt->end_io(rqd, error);
 }
 
 static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
