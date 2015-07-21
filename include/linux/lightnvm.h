@@ -79,7 +79,6 @@ struct nvm_tgt_instance {
 struct nvm_rq {
 	struct nvm_tgt_instance *ins;
 	struct bio *bio;
-	unsigned long flags;
 	sector_t phys_sector;
 };
 
