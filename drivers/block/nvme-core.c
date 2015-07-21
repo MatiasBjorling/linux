@@ -1937,11 +1937,20 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 	u8 lbaf, pi_type;
 	u16 old_ms;
 	unsigned short bs;
-	int ret = 0;
 
 	if (nvme_identify_ns(dev, ns->ns_id, &id)) {
 		dev_warn(dev->dev, "%s: Identify failure\n", __func__);
 		return 0;
+	}
+
+	if ((dev->ctrl_config & NVME_CC_CSS_LIGHTNVM) &&
+		id->nsfeat & NVME_NS_FEAT_NVM && ns->type != NVME_NS_NVM) {
+		if (nvme_nvm_register(ns->queue, disk)) {
+			dev_warn(dev->dev,
+				    "%s: LightNVM init failure\n", __func__);
+			return 0;
+		}
+		ns->type = NVME_NS_NVM;
 	}
 
 	old_ms = ns->ms;
@@ -1975,26 +1984,17 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 								!ns->ext)
 		nvme_init_integrity(ns);
 
-	if (dev->oncs & NVME_CTRL_ONCS_DSM)
-		nvme_config_discard(ns);
-
-	if ((dev->ctrl_config & NVME_CC_CSS_LIGHTNVM) &&
-		id->nsfeat & NVME_NS_FEAT_NVM && ns->type != NVME_NS_NVM) {
-		ret = nvme_nvm_register(ns->queue, disk);
-		if (ret)
-			dev_warn(dev->dev,
-				    "%s: LightNVM init failure\n", __func__);
-		ns->type = NVME_NS_NVM;
-	}
-
 	if (id->ncap == 0 || (ns->ms && !blk_get_integrity(disk)) ||
 						(ns->type == NVME_NS_NVM))
 		set_capacity(disk, 0);
 	else
 		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
 
+	if (dev->oncs & NVME_CTRL_ONCS_DSM)
+		nvme_config_discard(ns);
+
 	kfree(id);
-	return ret;
+	return 0;
 }
 
 static const struct block_device_operations nvme_fops = {
@@ -2087,6 +2087,7 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 	disk->first_minor = 0;
 	disk->fops = &nvme_fops;
 	disk->private_data = ns;
+	disk->queue = ns->queue;
 	disk->driverfs_dev = dev->device;
 	disk->flags = GENHD_FL_EXT_DEVT;
 	sprintf(disk->disk_name, "nvme%dn%d", dev->instance, nsid);
@@ -2103,7 +2104,6 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 
 	list_add_tail(&ns->list, &dev->namespaces);
 
-	disk->queue = ns->queue;
 	add_disk(ns->disk);
 	if (ns->ms)
 		revalidate_disk(ns->disk);
