@@ -544,41 +544,44 @@ err:
 	return NULL;
 }
 
-static void rrpc_end_io(struct nvm_rq *rqd, int error)
+static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd)
 {
-	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
-	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
-	struct bio *bio = rqd->bio;
 	struct nvm_addr *p = rrqd->addr;
 	struct nvm_block *block = p->block;
 	struct nvm_lun *lun = block->lun;
 	struct rrpc_block_gc *gcb;
-	int is_gc = rrqd->flags & NVM_IOTYPE_GC;
 	int cmnt_size;
 
-	if (bio_data_dir(bio) == WRITE) {
-		cmnt_size = atomic_inc_return(&block->data_cmnt_size);
-		if (likely(cmnt_size != lun->nr_pages_per_blk))
-			goto free_rqd;
+	cmnt_size = atomic_inc_return(&block->data_cmnt_size);
+	if (likely(cmnt_size != lun->nr_pages_per_blk))
+		return;
 
-		gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
-		if (!gcb) {
-			pr_err("rrpc: unable to queue block for gc.");
-			goto free_rqd;
-		}
-
-		gcb->rrpc = rrpc;
-		gcb->block = block;
-		INIT_WORK(&gcb->ws_gc, rrpc_gc_queue);
-
-		queue_work(rrpc->kgc_wq, &gcb->ws_gc);
+	gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
+	if (!gcb) {
+		pr_err("rrpc: unable to queue block for gc.");
+		return;
 	}
 
-free_rqd:
-	if (!is_gc) {
-		rrpc_unlock_rq(rrpc, bio, rqd);
-		mempool_free(rqd, rrpc->rq_pool);
-	}
+	gcb->rrpc = rrpc;
+	gcb->block = block;
+	INIT_WORK(&gcb->ws_gc, rrpc_gc_queue);
+
+	queue_work(rrpc->kgc_wq, &gcb->ws_gc);
+}
+
+static void rrpc_end_io(struct nvm_rq *rqd, int error)
+{
+	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
+	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
+
+	if (bio_data_dir(rqd->bio) == WRITE)
+		rrpc_end_io_write(rrpc, rrqd);
+
+	if (rrqd->flags & NVM_IOTYPE_GC)
+		return;
+
+	rrpc_unlock_rq(rrpc, rqd->bio, rqd);
+	mempool_free(rqd, rrpc->rq_pool);
 }
 
 static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
