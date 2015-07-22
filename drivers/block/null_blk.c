@@ -462,39 +462,21 @@ static struct nvm_dev_ops null_nvm_dev_ops = {
 	.submit_io	= null_nvm_submit_io,
 };
 
-static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
+static int null_nvm_register(struct nullb *nullb, struct gendisk *disk)
 {
-	int ret;
-
-	set_capacity(disk, 0);
-
-	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
-	disk->major		= null_major;
-	disk->first_minor	= nullb->index;
-	disk->queue		= nullb->q;
-
-	sprintf(disk->disk_name, "nullb%d", nullb->index);
-
-	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops);
-	if (ret)
-		return ret;
-	add_disk(disk);
-
-	return 0;
+	return nvm_register(nullb->q, disk, &null_nvm_dev_ops);
 }
 
-static void null_nvm_del_disk(struct gendisk *disk)
+static void null_nvm_unregister(struct gendisk *disk)
 {
 	nvm_unregister(disk);
-
-	del_gendisk(disk);
 }
 #else
-static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
+static int null_nvm_register(struct nullb *nullb, struct gendisk *disk)
 {
 	return -EINVAL;
 }
-static void null_nvm_del_disk(struct gendisk *disk) { }
+static void null_nvm_unregister(struct gendisk *disk) { }
 #endif /* CONFIG_NVM */
 
 static int null_queue_rq(struct blk_mq_hw_ctx *hctx,
@@ -545,9 +527,9 @@ static void null_del_dev(struct nullb *nullb)
 	list_del_init(&nullb->list);
 
 	if (nvm_enable)
-		null_nvm_del_disk(nullb->disk);
-	else
-		del_gendisk(nullb->disk);
+		null_nvm_unregister(nullb->disk);
+
+	del_gendisk(nullb->disk);
 
 	blk_cleanup_queue(nullb->q);
 	if (queue_mode == NULL_Q_MQ)
@@ -629,27 +611,11 @@ static int init_driver_queues(struct nullb *nullb)
 	return 0;
 }
 
-static void null_add_disk(struct nullb *nullb, struct gendisk *disk)
-{
-	sector_t size = gb * 1024 * 1024 * 1024ULL;
-
-	set_capacity(disk, size >> 9);
-
-	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
-	disk->major		= null_major;
-	disk->first_minor	= nullb->index;
-	disk->fops		= &null_fops;
-	disk->private_data	= nullb;
-	disk->queue		= nullb->q;
-
-	sprintf(disk->disk_name, "nullb%d", nullb->index);
-	add_disk(disk);
-}
-
 static int null_add_dev(void)
 {
 	struct gendisk *disk;
 	struct nullb *nullb;
+	sector_t size;
 	int rv;
 
 	nullb = kzalloc_node(sizeof(*nullb), GFP_KERNEL, home_node);
@@ -721,11 +687,24 @@ static int null_add_dev(void)
 	blk_queue_logical_block_size(nullb->q, bs);
 	blk_queue_physical_block_size(nullb->q, bs);
 
+	size = gb * 1024 * 1024 * 1024ULL;
+	set_capacity(disk, size >> 9);
+
+	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
+	disk->major		= null_major;
+	disk->first_minor	= nullb->index;
+	disk->fops		= &null_fops;
+	disk->private_data	= nullb;
+	disk->queue		= nullb->q;
+
+	sprintf(disk->disk_name, "nullb%d", nullb->index);
+
 	if (nvm_enable) {
-		if (null_nvm_add_disk(nullb, disk))
+		rv = null_nvm_register(nullb, disk);
+		if (rv)
 			goto out_cleanup_disk;
 	} else
-		null_add_disk(nullb, disk);
+		add_disk(disk);
 
 	mutex_lock(&lock);
 	list_add_tail(&nullb->list, &nullb_list);
