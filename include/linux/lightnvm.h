@@ -201,7 +201,6 @@ struct nvm_dev {
 	struct nvm_get_features features;
 
 	/* Backend device */
-	void *dev_private;
 	struct request_queue *q;
 	struct gendisk *disk;
 	char name[DISK_NAME_LEN];
@@ -301,7 +300,7 @@ extern void nvm_put_blk(struct nvm_dev *, struct nvm_block *);
 extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
 
 extern int nvm_register(struct request_queue *, struct gendisk *,
-						struct nvm_dev_ops *, void *);
+						struct nvm_dev_ops *);
 extern void nvm_unregister(struct gendisk *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);

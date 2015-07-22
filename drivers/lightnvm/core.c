@@ -272,8 +272,8 @@ int nvm_init(struct nvm_dev *dev)
 		return 0;
 	}
 
-	pr_info("nvm: luns: %u blocks: %lu sector size: %d configured\n",
-			dev->nr_luns, dev->total_blocks, dev->sector_size);
+	pr_info("nvm: registered %s with luns: %u blocks: %lu sector size: %d\n",
+		dev->name, dev->nr_luns, dev->total_blocks, dev->sector_size);
 
 	return 0;
 err:
@@ -363,7 +363,7 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 	tdisk->private_data = targetdata;
 	tqueue->queuedata = targetdata;
 
-	/* does not yet support multi-page IOs. */
+	/* missing support for multi-page IOs. */
 	blk_queue_max_hw_sectors(tqueue, 8);
 
 	set_capacity(tdisk, tt->capacity(targetdata));
@@ -405,8 +405,24 @@ static void nvm_remove_target(struct nvm_target *t)
 	kfree(t);
 }
 
-static int nvm_configure_show(struct nvm_dev *dev, const char *val)
+static int nvm_configure_show(const char *val)
 {
+	struct nvm_dev *dev;
+	char opcode, devname[DISK_NAME_LEN];
+	int ret;
+
+	ret = sscanf(val, "%c %s", &opcode, devname);
+	if (ret != 2) {
+		pr_err("nvm: invalid command. Use \"opcode devicename\".\n");
+		return -EINVAL;
+	}
+
+	dev = nvm_find_nvm_dev(devname);
+	if (!dev) {
+		pr_err("nvm: device not found\n");
+		return -EINVAL;
+	}
+
 	if (!dev->bm)
 		return 0;
 
@@ -415,26 +431,28 @@ static int nvm_configure_show(struct nvm_dev *dev, const char *val)
 	return 0;
 }
 
-static int nvm_configure_del(struct nvm_dev *dev, const char *val)
+static int nvm_configure_del(const char *val)
 {
 	struct nvm_target *t = NULL;
-	char opcode, devname[DISK_NAME_LEN], tname[255];
+	struct nvm_dev *dev;
+	char opcode, tname[255];
 	int ret;
 
-	ret = sscanf(val, "%c %s %s", &opcode, devname, tname);
-	if (ret != 3) {
-		pr_err("nvm: target name could not be read.\n");
+	ret = sscanf(val, "%c %s", &opcode, tname);
+	if (ret != 2) {
+		pr_err("nvm: invalid command. Use \"d targetname\".\n");
 		return -EINVAL;
 	}
 
 	down_write(&_lock);
-	list_for_each_entry(t, &dev->online_targets, list) {
-		if (!strcmp(tname, t->disk->disk_name)) {
-			nvm_remove_target(t);
-			ret = 0;
-			break;
+	list_for_each_entry(dev, &_devices, devices)
+		list_for_each_entry(t, &dev->online_targets, list) {
+			if (!strcmp(tname, t->disk->disk_name)) {
+				nvm_remove_target(t);
+				ret = 0;
+				break;
+			}
 		}
-	}
 	up_write(&_lock);
 
 	if (ret) {
@@ -445,15 +463,22 @@ static int nvm_configure_del(struct nvm_dev *dev, const char *val)
 	return 0;
 }
 
-static int nvm_configure_add(struct nvm_dev *dev, const char *val)
+static int nvm_configure_add(const char *val)
 {
+	struct nvm_dev *dev;
 	char opcode, devname[DISK_NAME_LEN], tgtengine[255], tname[255];
 	int lun_begin, lun_end, ret;
 
 	ret = sscanf(val, "%c %s %s %s %u:%u", &opcode, devname, tgtengine,
 						tname, &lun_begin, &lun_end);
 	if (ret != 6) {
-		pr_err("nvm: configure must be in the format of \"opcode device name tgtengine lun_begin:lun_end\".\n");
+		pr_err("nvm: invalid command. Use \"opcode device name tgtengine lun_begin:lun_end\".\n");
+		return -EINVAL;
+	}
+
+	dev = nvm_find_nvm_dev(devname);
+	if (!dev) {
+		pr_err("nvm: device not found\n");
 		return -EINVAL;
 	}
 
@@ -470,29 +495,22 @@ static int nvm_configure_add(struct nvm_dev *dev, const char *val)
 static int nvm_configure_by_str_event(const char *val,
 					const struct kernel_param *kp)
 {
-	struct nvm_dev *dev;
-	char opcode, devname[DISK_NAME_LEN];
+	char opcode;
 	int ret;
 
-	ret = sscanf(val, "%c %s", &opcode, devname);
-	if (ret != 2) {
-		pr_err("nvm: configure must be in the format of \"opcode device ...\"\n");
-		return -EINVAL;
-	}
-
-	dev = nvm_find_nvm_dev(devname);
-	if (!dev) {
-		pr_err("nvm: device not found\n");
+	ret = sscanf(val, "%c", &opcode);
+	if (ret != 1) {
+		pr_err("nvm: configure must be in the format of \"opcode ...\"\n");
 		return -EINVAL;
 	}
 
 	switch (opcode) {
 	case 'a':
-		return nvm_configure_add(dev, val);
+		return nvm_configure_add(val);
 	case 'd':
-		return nvm_configure_del(dev, val);
+		return nvm_configure_del(val);
 	case 's':
-		return nvm_configure_show(dev, val);
+		return nvm_configure_show(val);
 	default:
 		pr_err("nvm: invalid opcode.\n");
 		return -EINVAL;
@@ -501,9 +519,25 @@ static int nvm_configure_by_str_event(const char *val,
 	return 0;
 }
 
+static int nvm_configure_get(char *buf, const struct kernel_param *kp)
+{
+	int sz = 0;
+	char *buf_start = buf;
+	struct nvm_dev *dev;
+
+	buf += sprintf(buf, "available devices:\n");
+	list_for_each_entry(dev, &_devices, devices) {
+		if (sz > 4095 - DISK_NAME_LEN)
+			break;
+		buf += sprintf(buf, " %s\n", dev->name);
+	}
+
+	return buf - buf_start - 1;
+}
+
 static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
 	.set	= nvm_configure_by_str_event,
-	.get	= NULL,
+	.get	= nvm_configure_get,
 };
 
 #undef MODULE_PARAM_PREFIX
@@ -512,10 +546,8 @@ static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
 module_param_cb(configure_debug, &nvm_configure_by_str_event_param_ops, NULL,
 									0644);
 
-
 int nvm_register(struct request_queue *q, struct gendisk *disk,
-							struct nvm_dev_ops *ops,
-							void *dev_private)
+							struct nvm_dev_ops *ops)
 {
 	struct nvm_dev *dev;
 	int ret;
@@ -529,13 +561,8 @@ int nvm_register(struct request_queue *q, struct gendisk *disk,
 
 	dev->q = q;
 	dev->ops = ops;
-	dev->dev_private = dev_private;
 	dev->disk = disk;
 	strncpy(dev->name, disk->disk_name, DISK_NAME_LEN);
-
-	disk->fops = &nvm_fops;
-	disk->private_data = dev;
-	sprintf(disk->disk_name, "lnvm/%s", dev->name);
 
 	ret = nvm_init(dev);
 	if (ret)
@@ -554,7 +581,13 @@ EXPORT_SYMBOL(nvm_register);
 
 void nvm_unregister(struct gendisk *disk)
 {
-	struct nvm_dev *dev = disk->private_data;
+	struct nvm_dev *dev = nvm_find_nvm_dev(disk->disk_name);
+
+	if (!dev) {
+		pr_err("nvm: could not find device %s on unregister\n",
+							disk->disk_name);
+		return;
+	}
 
 	nvm_exit(dev);
 
