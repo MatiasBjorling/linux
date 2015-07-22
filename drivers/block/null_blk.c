@@ -475,10 +475,9 @@ static int null_nvm_add_disk(struct nullb *nullb, struct gendisk *disk)
 
 	sprintf(disk->disk_name, "nullb%d", nullb->index);
 
-	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops, NULL);
+	ret = nvm_register(nullb->q, disk, &null_nvm_dev_ops);
 	if (ret)
 		return ret;
-
 	add_disk(disk);
 
 	return 0;
