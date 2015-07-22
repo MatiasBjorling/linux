@@ -481,14 +481,13 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 
 int nvme_nvm_register(struct request_queue *q, struct gendisk *disk)
 {
-	return nvm_register(q, disk, &nvme_nvm_dev_ops, NULL);
+	return nvm_register(q, disk, &nvme_nvm_dev_ops);
 }
 #else
 void nvme_nvm_rqtocmd(struct request *rq, struct nvme_ns *ns,
 							struct nvme_command *c)
 {
 }
-
 int nvme_nvm_register(struct request_queue *q, struct gendisk *disk)
 {
 	return 0;

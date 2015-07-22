@@ -2104,7 +2104,8 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 
 	list_add_tail(&ns->list, &dev->namespaces);
 
-	add_disk(ns->disk);
+	if (ns->type != NVME_NS_NVM)
+		add_disk(ns->disk);
 	if (ns->ms)
 		revalidate_disk(ns->disk);
 	return;
