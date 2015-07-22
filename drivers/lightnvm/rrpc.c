@@ -974,10 +974,7 @@ static void rrpc_free(struct rrpc *rrpc)
 static void rrpc_exit(void *private)
 {
 	struct rrpc *rrpc = private;
-	struct block_device *bdev;
 
-	bdev = bdget_disk(rrpc->dev->disk, 0);
-	blkdev_put(bdev, FMODE_WRITE | FMODE_READ);
 	del_timer(&rrpc->gc_timer);
 
 	flush_workqueue(rrpc->krqd_wq);
@@ -1092,12 +1089,6 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	struct rrpc *rrpc;
 	int ret;
 
-	bdev = bdget_disk(dev->disk, 0);
-	if (blkdev_get(bdev, FMODE_WRITE | FMODE_READ, NULL)) {
-		pr_err("nvm: could not access backing device\n");
-		return ERR_PTR(-EINVAL);
-	}
-
 	rrpc = kzalloc(sizeof(struct rrpc), GFP_KERNEL);
 	if (!rrpc) {
 		ret = -ENOMEM;
@@ -1168,7 +1159,6 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	return rrpc;
 err:
-	blkdev_put(bdev, FMODE_WRITE | FMODE_READ);
 	rrpc_free(rrpc);
 	return ERR_PTR(ret);
 }
