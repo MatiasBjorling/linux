@@ -360,21 +360,6 @@ static void null_request_fn(struct request_queue *q)
 	}
 }
 
-static int null_open(struct block_device *bdev, fmode_t mode)
-{
-	return 0;
-}
-
-static void null_release(struct gendisk *disk, fmode_t mode)
-{
-}
-
-static const struct block_device_operations null_fops = {
-	.owner =	THIS_MODULE,
-	.open =		null_open,
-	.release =	null_release,
-};
-
 #ifdef CONFIG_NVM
 static int null_nvm_id(struct request_queue *q, struct nvm_id *id)
 {
@@ -538,6 +523,21 @@ static void null_del_dev(struct nullb *nullb)
 	kfree(nullb);
 }
 
+static int null_open(struct block_device *bdev, fmode_t mode)
+{
+	return 0;
+}
+
+static void null_release(struct gendisk *disk, fmode_t mode)
+{
+}
+
+static const struct block_device_operations null_fops = {
+	.owner =	THIS_MODULE,
+	.open =		null_open,
+	.release =	null_release,
+};
+
 static int setup_commands(struct nullb_queue *nq)
 {
 	struct nullb_cmd *cmd;
@@ -688,7 +688,8 @@ static int null_add_dev(void)
 	blk_queue_physical_block_size(nullb->q, bs);
 
 	size = gb * 1024 * 1024 * 1024ULL;
-	set_capacity(disk, size >> 9);
+	sector_div(size, bs);
+	set_capacity(disk, size);
 
 	disk->flags |= GENHD_FL_EXT_DEVT | GENHD_FL_SUPPRESS_PARTITION_INFO;
 	disk->major		= null_major;
@@ -696,15 +697,15 @@ static int null_add_dev(void)
 	disk->fops		= &null_fops;
 	disk->private_data	= nullb;
 	disk->queue		= nullb->q;
-
 	sprintf(disk->disk_name, "nullb%d", nullb->index);
 
 	if (nvm_enable) {
 		rv = null_nvm_register(nullb, disk);
 		if (rv)
 			goto out_cleanup_disk;
-	} else
+	} else {
 		add_disk(disk);
+	}
 
 	mutex_lock(&lock);
 	list_add_tail(&nullb->list, &nullb_list);
