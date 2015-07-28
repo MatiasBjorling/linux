@@ -2001,7 +2001,7 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 
 	if ((dev->ctrl_config & NVME_CC_CSS_LIGHTNVM) &&
 		id->nsfeat & NVME_NS_FEAT_NVM && ns->type != NVME_NS_NVM) {
-		if (nvme_nvm_register(ns->queue, disk)) {
+		if (nvme_nvm_register(ns->queue, disk->disk_name)) {
 			dev_warn(dev->dev,
 				    "%s: LightNVM init failure\n", __func__);
 			return -ENODEV;
@@ -2359,7 +2359,7 @@ static void nvme_free_namespace(struct nvme_ns *ns)
 	list_del(&ns->list);
 
 	if (ns->type == NVME_NS_NVM)
-		nvm_unregister(ns->disk);
+		nvme_nvm_unregister(ns->disk->disk_name);
 
 	spin_lock(&dev_list_lock);
 	ns->disk->private_data = NULL;
