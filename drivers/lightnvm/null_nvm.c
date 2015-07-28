@@ -314,7 +314,6 @@ static int null_add_dev(void)
 	nulln->tag_set.queue_depth = hw_queue_depth;
 	nulln->tag_set.numa_node = home_node;
 	nulln->tag_set.cmd_size = sizeof(struct nulln_cmd);
-	nulln->tag_set.flags = BLK_MQ_F_SHOULD_MERGE;
 	nulln->tag_set.driver_data = nulln;
 
 	rv = blk_mq_alloc_tag_set(&nulln->tag_set);
