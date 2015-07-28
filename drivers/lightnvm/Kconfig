@@ -39,4 +39,10 @@ config NVM_RRPC
 	host. The target is implemented using a linear mapping table and
 	cost-based garbage collection. It is optimized for 4K IO sizes.
 
+config NVM_NULL_NVM
+	tristate "Null test LightNVM driver"
+	---help---
+	The null test driver can be used to evaluate targets without an
+	underlying device.
+
 endif # NVM
