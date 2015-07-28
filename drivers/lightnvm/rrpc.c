@@ -16,8 +16,8 @@
 
 #include "rrpc.h"
 
-static struct kmem_cache *_gcb_cache, *_rq_cache;
-static DECLARE_RWSEM(_lock);
+static struct kmem_cache *rrpc_gcb_cache, *rrpc_rq_cache;
+static DECLARE_RWSEM(rrpc_lock);
 
 static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 				struct nvm_rq *rqd, unsigned long flags);
@@ -850,36 +850,36 @@ static int rrpc_core_init(struct rrpc *rrpc)
 {
 	int i;
 
-	down_write(&_lock);
-	if (!_gcb_cache) {
-		_gcb_cache = kmem_cache_create("rrpc_gcb",
+	down_write(&rrpc_lock);
+	if (!rrpc_gcb_cache) {
+		rrpc_gcb_cache = kmem_cache_create("rrpc_gcb",
 				sizeof(struct rrpc_block_gc), 0, 0, NULL);
-		if (!_gcb_cache) {
-			up_write(&_lock);
+		if (!rrpc_gcb_cache) {
+			up_write(&rrpc_lock);
 			return -ENOMEM;
 		}
 
-		_rq_cache = kmem_cache_create("rrpc_rq",
+		rrpc_rq_cache = kmem_cache_create("rrpc_rq",
 				sizeof(struct nvm_rq) + sizeof(struct rrpc_rq),
 				0, 0, NULL);
-		if (!_rq_cache) {
-			kmem_cache_destroy(_gcb_cache);
-			up_write(&_lock);
+		if (!rrpc_rq_cache) {
+			kmem_cache_destroy(rrpc_gcb_cache);
+			up_write(&rrpc_lock);
 			return -ENOMEM;
 		}
 	}
-	up_write(&_lock);
+	up_write(&rrpc_lock);
 
 	rrpc->page_pool = mempool_create_page_pool(PAGE_POOL_SIZE, 0);
 	if (!rrpc->page_pool)
 		return -ENOMEM;
 
 	rrpc->gcb_pool = mempool_create_slab_pool(rrpc->dev->nr_luns,
-								_gcb_cache);
+								rrpc_gcb_cache);
 	if (!rrpc->gcb_pool)
 		return -ENOMEM;
 
-	rrpc->rq_pool = mempool_create_slab_pool(64, _rq_cache);
+	rrpc->rq_pool = mempool_create_slab_pool(64, rrpc_rq_cache);
 	if (!rrpc->rq_pool)
 		return -ENOMEM;
 
