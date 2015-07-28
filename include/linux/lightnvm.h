@@ -94,8 +94,6 @@ static inline void *nvm_rq_to_pdu(struct nvm_rq *rqdata)
 
 struct nvm_block;
 
-extern void nvm_unregister(struct gendisk *);
-
 typedef int (nvm_l2p_update_fn)(u64, u64, u64 *, void *);
 typedef int (nvm_bb_update_fn)(u32, void *, unsigned int, void *);
 typedef int (nvm_id_fn)(struct request_queue *, struct nvm_id *);
@@ -202,7 +200,6 @@ struct nvm_dev {
 
 	/* Backend device */
 	struct request_queue *q;
-	struct gendisk *disk;
 	char name[DISK_NAME_LEN];
 };
 
@@ -299,9 +296,9 @@ extern struct nvm_block *nvm_get_blk(struct nvm_dev *, struct nvm_lun *,
 extern void nvm_put_blk(struct nvm_dev *, struct nvm_block *);
 extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
 
-extern int nvm_register(struct request_queue *, struct gendisk *,
+extern int nvm_register(struct request_queue *, char *,
 						struct nvm_dev_ops *);
-extern void nvm_unregister(struct gendisk *);
+extern void nvm_unregister(char *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 
@@ -363,17 +360,12 @@ static inline struct nvm_tgt_type *nvm_find_target_type(const char *c)
 {
 	return NULL;
 }
-static inline int nvm_register_target(struct nvm_tgt_type *tt)
+static inline int nvm_register(struct request_queue *q, char *disk_name,
+							struct nvm_dev_ops *ops)
 {
 	return -EINVAL;
 }
-static inline void nvm_unregister_target(struct nvm_tgt_type *tt) {}
-static inline int nvm_register(struct request_queue *q, struct gendisk *disk,
-				struct nvm_dev_ops *ops, void *dev_private)
-{
-	return -EINVAL;
-}
-static inline void nvm_unregister(struct gendisk *disk) {}
+static inline void nvm_unregister(char *disk_name) {}
 static inline struct nvm_block *nvm_get_blk(struct nvm_dev *dev,
 				struct nvm_lun *lun, unsigned long flags)
 {

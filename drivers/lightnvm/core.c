@@ -1,6 +1,4 @@
 /*
- * core.c - Open-channel SSD integration core
- *
  * Copyright (C) 2015 IT University of Copenhagen
  * Initial release: Matias Bjorling <mabj@itu.dk>
  *
@@ -30,16 +28,16 @@
 
 #include <linux/lightnvm.h>
 
-static LIST_HEAD(_targets);
-static LIST_HEAD(_bms);
-static LIST_HEAD(_devices);
-static DECLARE_RWSEM(_lock);
+static LIST_HEAD(nvm_targets);
+static LIST_HEAD(nvm_bms);
+static LIST_HEAD(nvm_devices);
+static DECLARE_RWSEM(nvm_lock);
 
 struct nvm_tgt_type *nvm_find_target_type(const char *name)
 {
 	struct nvm_tgt_type *tt;
 
-	list_for_each_entry(tt, &_targets, list)
+	list_for_each_entry(tt, &nvm_targets, list)
 		if (!strcmp(name, tt->name))
 			return tt;
 
@@ -50,12 +48,12 @@ int nvm_register_target(struct nvm_tgt_type *tt)
 {
 	int ret = 0;
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	if (nvm_find_target_type(tt->name))
 		ret = -EEXIST;
 	else
-		list_add(&tt->list, &_targets);
-	up_write(&_lock);
+		list_add(&tt->list, &nvm_targets);
+	up_write(&nvm_lock);
 
 	return ret;
 }
@@ -66,9 +64,9 @@ void nvm_unregister_target(struct nvm_tgt_type *tt)
 	if (!tt)
 		return;
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	list_del(&tt->list);
-	up_write(&_lock);
+	up_write(&nvm_lock);
 }
 EXPORT_SYMBOL(nvm_unregister_target);
 
@@ -76,7 +74,7 @@ struct nvm_bm_type *nvm_find_bm_type(const char *name)
 {
 	struct nvm_bm_type *bt;
 
-	list_for_each_entry(bt, &_bms, list)
+	list_for_each_entry(bt, &nvm_bms, list)
 		if (!strcmp(name, bt->name))
 			return bt;
 
@@ -87,12 +85,12 @@ int nvm_register_bm(struct nvm_bm_type *bt)
 {
 	int ret = 0;
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	if (nvm_find_bm_type(bt->name))
 		ret = -EEXIST;
 	else
-		list_add(&bt->list, &_bms);
-	up_write(&_lock);
+		list_add(&bt->list, &nvm_bms);
+	up_write(&nvm_lock);
 
 	return ret;
 }
@@ -103,9 +101,9 @@ void nvm_unregister_bm(struct nvm_bm_type *bt)
 	if (!bt)
 		return;
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	list_del(&bt->list);
-	up_write(&_lock);
+	up_write(&nvm_lock);
 }
 EXPORT_SYMBOL(nvm_unregister_bm);
 
@@ -113,7 +111,7 @@ struct nvm_dev *nvm_find_nvm_dev(const char *name)
 {
 	struct nvm_dev *dev;
 
-	list_for_each_entry(dev, &_devices, devices)
+	list_for_each_entry(dev, &nvm_devices, devices)
 		if (!strcmp(name, dev->name))
 			return dev;
 
@@ -257,7 +255,7 @@ int nvm_init(struct nvm_dev *dev)
 	}
 
 	/* register with device with a supported BM */
-	list_for_each_entry(bt, &_bms, list) {
+	list_for_each_entry(bt, &nvm_bms, list) {
 		ret = bt->register_bm(dev);
 		if (ret < 0)
 			goto err; /* initialization failed */
@@ -289,26 +287,8 @@ void nvm_exit(struct nvm_dev *dev)
 	pr_info("nvm: successfully unloaded\n");
 }
 
-static int nvm_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
-							unsigned long arg)
-{
-	return 0;
-}
-
-static int nvm_open(struct block_device *bdev, fmode_t mode)
-{
-	return 0;
-}
-
-static void nvm_release(struct gendisk *disk, fmode_t mode)
-{
-}
-
 static const struct block_device_operations nvm_fops = {
 	.owner		= THIS_MODULE,
-	.ioctl		= nvm_ioctl,
-	.open		= nvm_open,
-	.release	= nvm_release,
 };
 
 static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
@@ -326,15 +306,15 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 		return -EINVAL;
 	}
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	list_for_each_entry(t, &dev->online_targets, list) {
 		if (!strcmp(tname, t->disk->disk_name)) {
 			pr_err("nvm: target name already exists.\n");
-			up_write(&_lock);
+			up_write(&nvm_lock);
 			return -EINVAL;
 		}
 	}
-	up_write(&_lock);
+	up_write(&nvm_lock);
 
 	t = kmalloc(sizeof(struct nvm_target), GFP_KERNEL);
 	if (!t)
@@ -372,9 +352,9 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 	t->type = tt;
 	t->disk = tdisk;
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	list_add_tail(&t->list, &dev->online_targets);
-	up_write(&_lock);
+	up_write(&nvm_lock);
 
 	return 0;
 err_init:
@@ -386,12 +366,13 @@ err_t:
 	return -ENOMEM;
 }
 
-/* _lock must be taken */
 static void nvm_remove_target(struct nvm_target *t)
 {
 	struct nvm_tgt_type *tt = t->type;
 	struct gendisk *tdisk = t->disk;
 	struct request_queue *q = tdisk->queue;
+
+	lockdep_assert_held(&nvm_lock);
 
 	del_gendisk(tdisk);
 	if (tt->exit)
@@ -444,8 +425,8 @@ static int nvm_configure_del(const char *val)
 		return -EINVAL;
 	}
 
-	down_write(&_lock);
-	list_for_each_entry(dev, &_devices, devices)
+	down_write(&nvm_lock);
+	list_for_each_entry(dev, &nvm_devices, devices)
 		list_for_each_entry(t, &dev->online_targets, list) {
 			if (!strcmp(tname, t->disk->disk_name)) {
 				nvm_remove_target(t);
@@ -453,7 +434,7 @@ static int nvm_configure_del(const char *val)
 				break;
 			}
 		}
-	up_write(&_lock);
+	up_write(&nvm_lock);
 
 	if (ret) {
 		pr_err("nvm: target \"%s\" doesn't exist.\n", tname);
@@ -526,11 +507,13 @@ static int nvm_configure_get(char *buf, const struct kernel_param *kp)
 	struct nvm_dev *dev;
 
 	buf += sprintf(buf, "available devices:\n");
-	list_for_each_entry(dev, &_devices, devices) {
+	down_write(&nvm_lock);
+	list_for_each_entry(dev, &nvm_devices, devices) {
 		if (sz > 4095 - DISK_NAME_LEN)
 			break;
 		buf += sprintf(buf, " %s\n", dev->name);
 	}
+	up_write(&nvm_lock);
 
 	return buf - buf_start - 1;
 }
@@ -546,7 +529,7 @@ static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
 module_param_cb(configure_debug, &nvm_configure_by_str_event_param_ops, NULL,
 									0644);
 
-int nvm_register(struct request_queue *q, struct gendisk *disk,
+int nvm_register(struct request_queue *q, char *disk_name,
 							struct nvm_dev_ops *ops)
 {
 	struct nvm_dev *dev;
@@ -561,16 +544,15 @@ int nvm_register(struct request_queue *q, struct gendisk *disk,
 
 	dev->q = q;
 	dev->ops = ops;
-	dev->disk = disk;
-	strncpy(dev->name, disk->disk_name, DISK_NAME_LEN);
+	strncpy(dev->name, disk_name, DISK_NAME_LEN);
 
 	ret = nvm_init(dev);
 	if (ret)
 		goto err_init;
 
-	down_write(&_lock);
-	list_add(&dev->devices, &_devices);
-	up_write(&_lock);
+	down_write(&nvm_lock);
+	list_add(&dev->devices, &nvm_devices);
+	up_write(&nvm_lock);
 
 	return 0;
 err_init:
@@ -579,20 +561,20 @@ err_init:
 }
 EXPORT_SYMBOL(nvm_register);
 
-void nvm_unregister(struct gendisk *disk)
+void nvm_unregister(char *disk_name)
 {
-	struct nvm_dev *dev = nvm_find_nvm_dev(disk->disk_name);
+	struct nvm_dev *dev = nvm_find_nvm_dev(disk_name);
 
 	if (!dev) {
 		pr_err("nvm: could not find device %s on unregister\n",
-							disk->disk_name);
+								disk_name);
 		return;
 	}
 
 	nvm_exit(dev);
 
-	down_write(&_lock);
+	down_write(&nvm_lock);
 	list_del(&dev->devices);
-	up_write(&_lock);
+	up_write(&nvm_lock);
 }
 EXPORT_SYMBOL(nvm_unregister);
