@@ -30,4 +30,7 @@ config NVM_BM_HB
 	while keeping data placement and garbage collection decisions on the
 	host.
 
+config NVM_NULL_NVM
+	tristate "Null test LightNVM driver"
+
 endif # NVM
