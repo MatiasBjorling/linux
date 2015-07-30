@@ -2004,6 +2004,7 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 		if (nvme_nvm_register(ns->queue, disk->disk_name)) {
 			dev_warn(dev->dev,
 				    "%s: LightNVM init failure\n", __func__);
+			kfree(id);
 			return -ENODEV;
 		}
 		ns->type = NVME_NS_NVM;
