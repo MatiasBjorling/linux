@@ -18,13 +18,13 @@
 static void hb_blocks_free(struct nvm_dev *dev)
 {
 	struct bm_hb *bm = dev->bmp;
-	struct nvm_lun *lun;
+	struct bm_lun *lun;
 	int i;
 
-	bm_for_each_lun(dev, bm, lun, i) {
-		if (!lun->blocks)
+	bm_for_each_lun(bm, lun, i) {
+		if (!lun->vlun.blocks)
 			break;
-		vfree(lun->blocks);
+		vfree(lun->vlun.blocks);
 	}
 }
 
@@ -37,48 +37,43 @@ static void hb_luns_free(struct nvm_dev *dev)
 
 static int hb_luns_init(struct nvm_dev *dev, struct bm_hb *bm)
 {
-	struct nvm_lun *lun;
+	struct bm_lun *lun;
 	struct nvm_id_chnl *chnl;
 	int i;
 
-	bm->luns = kcalloc(dev->nr_luns, sizeof(struct nvm_lun), GFP_KERNEL);
+	bm->luns = kcalloc(bm->nr_luns, sizeof(struct bm_lun), GFP_KERNEL);
 	if (!bm->luns)
 		return -ENOMEM;
 
-	bm_for_each_lun(dev, bm, lun, i) {
+	bm_for_each_lun(bm, lun, i) {
 		chnl = &dev->identity.chnls[i];
 		pr_info("bm_hb: p %u qsize %u gr %u ge %u begin %llu end %llu\n",
 			i, chnl->queue_size, chnl->gran_read, chnl->gran_erase,
 			chnl->laddr_begin, chnl->laddr_end);
 
-		spin_lock_init(&lun->lock);
+		spin_lock_init(&lun->vlun.lock);
 
 		INIT_LIST_HEAD(&lun->free_list);
 		INIT_LIST_HEAD(&lun->used_list);
 		INIT_LIST_HEAD(&lun->bb_list);
 
-		lun->id = i;
-		lun->dev = dev;
+		lun->vlun.id = i;
 		lun->chnl = chnl;
 		lun->reserved_blocks = 2; /* for GC only */
-		lun->nr_blocks =
+		lun->vlun.nr_blocks =
 				(chnl->laddr_end - chnl->laddr_begin + 1) /
 				(chnl->gran_erase / chnl->gran_read);
-		lun->nr_free_blocks = lun->nr_blocks;
-		lun->nr_pages_per_blk = chnl->gran_erase / chnl->gran_write *
+		lun->vlun.nr_free_blocks = lun->vlun.nr_blocks;
+		lun->vlun.nr_pages_per_blk =
+				chnl->gran_erase / chnl->gran_write *
 					(chnl->gran_write / dev->sector_size);
 
-		if (lun->nr_pages_per_blk > dev->max_pages_per_blk)
-			dev->max_pages_per_blk = lun->nr_pages_per_blk;
+		if (lun->vlun.nr_pages_per_blk > dev->max_pages_per_blk)
+			dev->max_pages_per_blk = lun->vlun.nr_pages_per_blk;
 
-		dev->total_pages += lun->nr_blocks * lun->nr_pages_per_blk;
-		dev->total_blocks += lun->nr_blocks;
-
-		if (lun->nr_pages_per_blk >
-				MAX_INVALID_PAGES_STORAGE * BITS_PER_LONG) {
-			pr_err("bm_hb: number of pages per block too high.");
-			return -EINVAL;
-		}
+		dev->total_pages += lun->vlun.nr_blocks *
+						lun->vlun.nr_pages_per_blk;
+		dev->total_blocks += lun->vlun.nr_blocks;
 	}
 
 	return 0;
@@ -88,7 +83,7 @@ static int hb_block_bb(u32 lun_id, void *bb_bitmap, unsigned int nr_blocks,
 								void *private)
 {
 	struct bm_hb *bm = private;
-	struct nvm_lun *lun = &bm->luns[lun_id];
+	struct bm_lun *lun = &bm->luns[lun_id];
 	struct nvm_block *block;
 	int i;
 
@@ -98,7 +93,7 @@ static int hb_block_bb(u32 lun_id, void *bb_bitmap, unsigned int nr_blocks,
 	i = -1;
 	while ((i = find_next_bit(bb_bitmap, nr_blocks, i + 1)) <
 			nr_blocks) {
-		block = &lun->blocks[i];
+		block = &lun->vlun.blocks[i];
 		if (!block) {
 			pr_err("bm_hb: BB data is out of bounds!\n");
 			return -EINVAL;
@@ -115,10 +110,10 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 	struct bm_hb *bm = dev->bmp;
 	sector_t max_pages = dev->total_pages * (dev->sector_size >> 9);
 	u64 elba = slba + nlb;
-	struct nvm_lun *lun;
+	struct bm_lun *lun;
 	struct nvm_block *blk;
 	sector_t total_pgs_per_lun = /* each lun have the same configuration */
-		   bm->luns[0].nr_blocks * bm->luns[0].nr_pages_per_blk;
+		 bm->luns[0].vlun.nr_blocks * bm->luns[0].vlun.nr_pages_per_blk;
 	u64 i;
 	int lun_id;
 
@@ -147,7 +142,7 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 
 		/* Calculate block offset into lun */
 		pba = pba - (total_pgs_per_lun * lun_id);
-		blk = &lun->blocks[pba / lun->nr_pages_per_blk];
+		blk = &lun->vlun.blocks[pba / lun->vlun.nr_pages_per_blk];
 
 		if (!blk->type) {
 			/* at this point, we don't know anything about the
@@ -155,7 +150,7 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 			 * block state */
 			list_move_tail(&blk->list, &lun->used_list);
 			blk->type = 1;
-			lun->nr_free_blocks--;
+			lun->vlun.nr_free_blocks--;
 		}
 	}
 
@@ -164,34 +159,35 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 
 static int hb_blocks_init(struct nvm_dev *dev, struct bm_hb *bm)
 {
-	struct nvm_lun *lun;
+	struct bm_lun *lun;
 	struct nvm_block *block;
-	sector_t lun_iter, block_iter, cur_block_id = 0;
+	sector_t lun_iter, blk_iter, cur_block_id = 0;
 	int ret;
 
-	bm_for_each_lun(dev, bm, lun, lun_iter) {
-		lun->blocks = vzalloc(sizeof(struct nvm_block) *
-						lun->nr_blocks);
-		if (!lun->blocks)
+	bm_for_each_lun(bm, lun, lun_iter) {
+		lun->vlun.blocks = vzalloc(sizeof(struct nvm_block) *
+						lun->vlun.nr_blocks);
+		if (!lun->vlun.blocks)
 			return -ENOMEM;
 
-		lun_for_each_block(lun, block, block_iter) {
-			spin_lock_init(&block->lock);
+		for (blk_iter = 0; blk_iter < lun->vlun.nr_blocks; blk_iter++) {
+			block = &lun->vlun.blocks[blk_iter];
+
 			INIT_LIST_HEAD(&block->list);
 
-			block->lun = lun;
+			block->lun = &lun->vlun;
 			block->id = cur_block_id++;
 
 			/* First block is reserved for device */
-			if (unlikely(lun_iter == 0 && block_iter == 0))
+			if (unlikely(lun_iter == 0 && blk_iter == 0))
 				continue;
 
 			list_add_tail(&block->list, &lun->free_list);
 		}
 
 		if (dev->ops->get_bb_tbl) {
-			ret = dev->ops->get_bb_tbl(dev->q, lun->id,
-			lun->nr_blocks, hb_block_bb, bm);
+			ret = dev->ops->get_bb_tbl(dev->q, lun->vlun.id,
+			lun->vlun.nr_blocks, hb_block_bb, bm);
 			if (ret)
 				pr_err("bm_hb: could not read BB table\n");
 		}
@@ -221,6 +217,7 @@ static int hb_register(struct nvm_dev *dev)
 	if (!bm)
 		return -ENOMEM;
 
+	bm->nr_luns = dev->nr_luns;
 	dev->bmp = bm;
 
 	ret = hb_luns_init(dev, bm);
@@ -249,61 +246,50 @@ static void hb_unregister(struct nvm_dev *dev)
 	dev->bmp = NULL;
 }
 
-static void nvm_reset_block(struct nvm_lun *lun, struct nvm_block *block)
-{
-	spin_lock(&block->lock);
-	bitmap_zero(block->invalid_pages, lun->nr_pages_per_blk);
-	block->next_page = 0;
-	block->nr_invalid_pages = 0;
-	atomic_set(&block->data_cmnt_size, 0);
-	spin_unlock(&block->lock);
-}
-
-static struct nvm_block *hb_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
+static struct nvm_block *hb_get_blk(struct nvm_dev *dev, struct nvm_lun *vlun,
 							unsigned long flags)
 {
-	struct nvm_block *block = NULL;
+	struct bm_lun *lun = container_of(vlun, struct bm_lun, vlun);
+	struct nvm_block *blk = NULL;
 	int is_gc = flags & NVM_IOTYPE_GC;
 
 	BUG_ON(!lun);
 
-	spin_lock(&lun->lock);
+	spin_lock(&vlun->lock);
 
 	if (list_empty(&lun->free_list)) {
 		pr_err_ratelimited("bm_hb: lun %u have no free pages available",
-								lun->id);
-		spin_unlock(&lun->lock);
+								lun->vlun.id);
+		spin_unlock(&vlun->lock);
 		goto out;
 	}
 
-	while (!is_gc && lun->nr_free_blocks < lun->reserved_blocks) {
-		spin_unlock(&lun->lock);
+	while (!is_gc && lun->vlun.nr_free_blocks < lun->reserved_blocks) {
+		spin_unlock(&vlun->lock);
 		goto out;
 	}
 
-	block = list_first_entry(&lun->free_list, struct nvm_block, list);
-	list_move_tail(&block->list, &lun->used_list);
+	blk = list_first_entry(&lun->free_list, struct nvm_block, list);
+	list_move_tail(&blk->list, &lun->used_list);
 
-	lun->nr_free_blocks--;
+	lun->vlun.nr_free_blocks--;
 
-	spin_unlock(&lun->lock);
-
-	nvm_reset_block(lun, block);
-
+	spin_unlock(&vlun->lock);
 out:
-	return block;
+	return blk;
 }
 
 static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	struct nvm_lun *lun = blk->lun;
+	struct nvm_lun *vlun = blk->lun;
+	struct bm_lun *lun = container_of(vlun, struct bm_lun, vlun);
 
-	spin_lock(&lun->lock);
+	spin_lock(&vlun->lock);
 
 	list_move_tail(&blk->list, &lun->free_list);
-	lun->nr_free_blocks++;
+	lun->vlun.nr_free_blocks++;
 
-	spin_unlock(&lun->lock);
+	spin_unlock(&vlun->lock);
 }
 
 static int hb_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
@@ -333,17 +319,18 @@ static struct nvm_lun *hb_get_luns(struct nvm_dev *dev, int begin, int end)
 {
 	struct bm_hb *bm = dev->bmp;
 
-	return bm->luns + begin;
+	return &bm->luns[begin].vlun;
 }
 
 static void hb_free_blocks_print(struct nvm_dev *dev)
 {
 	struct bm_hb *bm = dev->bmp;
-	struct nvm_lun *lun;
+	struct bm_lun *lun;
 	unsigned int i;
 
-	bm_for_each_lun(dev, bm, lun, i)
-		pr_info("%s: lun%8u\t%u\n", dev->name, i, lun->nr_free_blocks);
+	bm_for_each_lun(bm, lun, i)
+		pr_info("%s: lun%8u\t%u\n",
+					dev->name, i, lun->vlun.nr_free_blocks);
 }
 
 static struct nvm_bm_type bm_hb = {

@@ -20,12 +20,27 @@
 
 #include <linux/lightnvm.h>
 
-struct bm_hb {
-	struct nvm_lun *luns;
+struct bm_lun {
+	struct nvm_lun vlun;
+
+	int reserved_blocks;
+	/* lun block lists */
+	struct list_head used_list;	/* In-use blocks */
+	struct list_head free_list;	/* Not used blocks i.e. released
+					 * and ready for use */
+	struct list_head bb_list;	/* Bad blocks. Mutually exclusive with
+					   free_list and used_list */
+
+	struct nvm_id_chnl *chnl;
 };
 
-#define bm_for_each_lun(dev, bm, lun, i) \
+struct bm_hb {
+	int nr_luns;
+	struct bm_lun *luns;
+};
+
+#define bm_for_each_lun(bm, lun, i) \
 		for ((i) = 0, lun = &(bm)->luns[0]; \
-			(i) < (dev)->nr_luns; (i)++, lun = &(bm)->luns[(i)])
+			(i) < (bm)->nr_luns; (i)++, lun = &(bm)->luns[(i)])
 
 #endif /* BM_HB_H_ */
