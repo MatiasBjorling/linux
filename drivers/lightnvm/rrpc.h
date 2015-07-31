@@ -47,24 +47,36 @@ struct rrpc_inflight_rq {
 
 struct rrpc_rq {
 	struct rrpc_inflight_rq inflight_rq;
-	struct nvm_addr *addr;
+	struct rrpc_addr *addr;
 	unsigned long flags;
 };
 
 struct rrpc_block {
 	struct nvm_block *parent;
 	struct list_head prio;
+
+	spinlock_t lock;
+
+#define MAX_INVALID_PAGES_STORAGE 8
+	/* Bitmap for invalid page intries */
+	unsigned long invalid_pages[MAX_INVALID_PAGES_STORAGE];
+	/* points to the next writable page within a block */
+	unsigned int next_page;
+	/* number of pages that are invalid, wrt host page size */
+	unsigned int nr_invalid_pages;
+
+	/* Persistent data structures */
+	atomic_t data_cmnt_size; /* data pages committed to stable storage */
 };
 
 struct rrpc_lun {
 	struct rrpc *rrpc;
 	struct nvm_lun *parent;
-	struct nvm_block *cur, *gc_cur;
+	struct rrpc_block *cur, *gc_cur;
 	struct rrpc_block *blocks;	/* Reference to block allocation */
 	struct list_head prio_list;		/* Blocks that may be GC'ed */
 	struct work_struct ws_gc;
 
-	int nr_blocks;
 	spinlock_t lock;
 };
 
@@ -79,10 +91,10 @@ struct rrpc {
 	spinlock_t bio_lock;
 	struct work_struct ws_requeue;
 
-	int nr_luns;
 	int lun_offset;
 	sector_t poffset; /* physical page offset */
 
+	int nr_luns;
 	struct rrpc_lun *luns;
 
 	/* calculated values */
@@ -97,9 +109,9 @@ struct rrpc {
 	/* Simple translation map of logical addresses to physical addresses.
 	 * The logical addresses is known by the host system, while the physical
 	 * addresses are used when writing to the disk block device. */
-	struct nvm_addr *trans_map;
+	struct rrpc_addr *trans_map;
 	/* also store a reverse map for garbage collection */
-	struct nvm_rev_addr *rev_trans_map;
+	struct rrpc_rev_addr *rev_trans_map;
 	spinlock_t rev_lock;
 
 	struct nvm_inflight inflight_map[NVM_INFLIGHT_PARTITIONS];
@@ -116,8 +128,19 @@ struct rrpc {
 
 struct rrpc_block_gc {
 	struct rrpc *rrpc;
-	struct nvm_block *block;
+	struct rrpc_block *rblk;
 	struct work_struct ws_gc;
+};
+
+/* Logical to physical mapping */
+struct rrpc_addr {
+	sector_t addr;
+	struct rrpc_block *rblk;
+};
+
+/* Physical to logical mapping */
+struct rrpc_rev_addr {
+	sector_t addr;
 };
 
 static inline sector_t nvm_get_laddr(struct bio *bio)
