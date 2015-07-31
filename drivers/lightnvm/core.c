@@ -118,25 +118,6 @@ struct nvm_dev *nvm_find_nvm_dev(const char *name)
 	return NULL;
 }
 
-
-sector_t nvm_alloc_addr(struct nvm_block *block)
-{
-	sector_t addr = ADDR_EMPTY;
-
-	spin_lock(&block->lock);
-	if (block_is_full(block))
-		goto out;
-
-	addr = block_to_addr(block) + block->next_page;
-
-	block->next_page++;
-out:
-	spin_unlock(&block->lock);
-	return addr;
-}
-EXPORT_SYMBOL(nvm_alloc_addr);
-
-
 struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
 							unsigned long flags)
 {

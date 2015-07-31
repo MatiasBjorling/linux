@@ -119,58 +119,34 @@ struct nvm_dev_ops {
 	nvm_erase_blk_fn	*erase_block;
 };
 
-/*
- * We assume that the device exposes its channels as a linear address
- * space. A lun therefore have a phy_addr_start and phy_addr_end that
- * denotes the start and end. This abstraction is used to let the
- * open-channel SSD (or any other device) expose its read/write/erase
- * interface and be administrated by the host system.
- */
 struct nvm_lun {
-	struct nvm_dev *dev;
-
-	/* lun block lists */
-	struct list_head used_list;	/* In-use blocks */
-	struct list_head free_list;	/* Not used blocks i.e. released
-					 * and ready for use */
-	struct list_head bb_list;	/* Bad blocks. Mutually exclusive with
-					   free_list and used_list */
-
-	struct {
-		spinlock_t lock;
-	} ____cacheline_aligned_in_smp;
-
-	struct nvm_block *blocks;
-	struct nvm_id_chnl *chnl;
-
 	int id;
-	int reserved_blocks;
 
+	int nr_pages_per_blk;
 	unsigned int nr_blocks;		/* end_block - start_block. */
 	unsigned int nr_free_blocks;	/* Number of unused blocks */
 
-	int nr_pages_per_blk;
+	struct nvm_block *blocks;
+
+	spinlock_t lock;
 };
 
 struct nvm_block {
-	/* Management structures */
 	struct list_head list;
 	struct nvm_lun *lun;
 
-	spinlock_t lock;
+	union {
+		struct {
+			unsigned long type :1; /* blk used if set */
+			unsigned long blk :27; /* blkid */
+			unsigned long pg :36; /* pgid */
+		} id_hb;
+		unsigned long long id;
+	};
 
-#define MAX_INVALID_PAGES_STORAGE 8
-	/* Bitmap for invalid page intries */
-	unsigned long invalid_pages[MAX_INVALID_PAGES_STORAGE];
-	/* points to the next writable page within a block */
-	unsigned int next_page;
-	/* number of pages that are invalid, wrt host page size */
-	unsigned int nr_invalid_pages;
-
-	unsigned int id;
 	int type;
-	/* Persistent data structures */
-	atomic_t data_cmnt_size; /* data pages committed to stable storage */
+
+	void *priv;
 };
 
 struct nvm_dev {
@@ -201,17 +177,6 @@ struct nvm_dev {
 	/* Backend device */
 	struct request_queue *q;
 	char name[DISK_NAME_LEN];
-};
-
-/* Logical to physical mapping */
-struct nvm_addr {
-	sector_t addr;
-	struct nvm_block *block;
-};
-
-/* Physical to logical mapping */
-struct nvm_rev_addr {
-	sector_t addr;
 };
 
 typedef void (nvm_tgt_make_rq_fn)(struct request_queue *, struct bio *);
@@ -302,18 +267,6 @@ extern void nvm_unregister(char *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 
-extern sector_t nvm_alloc_addr(struct nvm_block *);
-
-#define lun_for_each_block(p, b, i) \
-		for ((i) = 0, b = &(p)->blocks[0]; \
-			(i) < (p)->nr_blocks; (i)++, b = &(p)->blocks[(i)])
-
-#define block_for_each_page(b, p) \
-		for ((p)->addr = block_to_addr((b)), (p)->block = (b); \
-			(p)->addr < block_to_addr((b)) \
-				+ (b)->lun->dev->nr_pages_per_blk; \
-			(p)->addr++)
-
 /* We currently assume that we the lightnvm device is accepting data in 512
  * bytes chunks. This should be set to the smallest command size available for a
  * given device.
@@ -325,20 +278,6 @@ extern sector_t nvm_alloc_addr(struct nvm_block *);
 
 #define NVM_MSG_PREFIX "nvm"
 #define ADDR_EMPTY (~0ULL)
-
-static inline int block_is_full(struct nvm_block *block)
-{
-	struct nvm_lun *lun = block->lun;
-
-	return block->next_page == lun->nr_pages_per_blk;
-}
-
-static inline sector_t block_to_addr(struct nvm_block *block)
-{
-	struct nvm_lun *lun = block->lun;
-
-	return block->id * lun->nr_pages_per_blk;
-}
 
 static inline unsigned long nvm_get_rq_flags(struct request *rq)
 {
@@ -375,10 +314,6 @@ static inline void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk) {}
 static inline int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return -EINVAL;
-}
-static inline sector_t nvm_alloc_addr(struct nvm_block *blk)
-{
-	return 0;
 }
 
 #endif /* CONFIG_NVM */
