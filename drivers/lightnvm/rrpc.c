@@ -106,6 +106,7 @@ static void rrpc_discard(struct rrpc *rrpc, struct bio *bio)
 	} while (!rqd);
 
 	if (IS_ERR(rqd)) {
+		pr_err("rrpc: unable to acquire inflight IO\n");
 		bio_io_error(bio);
 		return;
 	}
@@ -593,17 +594,9 @@ err:
 	return NULL;
 }
 
-static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd)
+static void rrpc_run_gc(struct rrpc *rrpc, struct rrpc_block *block)
 {
-	struct rrpc_addr *p = rrqd->addr;
-	struct rrpc_block *rblk = p->rblk;
-	struct nvm_lun *lun = rblk->parent->lun;
 	struct rrpc_block_gc *gcb;
-	int cmnt_size;
-
-	cmnt_size = atomic_inc_return(&rblk->data_cmnt_size);
-	if (likely(cmnt_size != lun->nr_pages_per_blk))
-		return;
 
 	gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
 	if (!gcb) {
@@ -613,24 +606,84 @@ static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd)
 
 	gcb->rrpc = rrpc;
 	gcb->rblk = rblk;
-	INIT_WORK(&gcb->ws_gc, rrpc_gc_queue);
 
+	INIT_WORK(&gcb->ws_gc, rrpc_gc_queue);
 	queue_work(rrpc->kgc_wq, &gcb->ws_gc);
+}
+
+static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd,
+						sector_t l_addr, uint8_t npages)
+{
+	struct rrpc_addr *p;
+	struct rrpc_block *rblk;
+	struct nvm_lun *lun;
+	int cmnt_size, i;
+
+	for (i = 0; i < npages; i++) {
+		p = &rrpc->trans_map[l_addr + i];
+		rblk = p->rblk;
+		lun = rblk->parent->lun;
+
+		cmnt_size = atomic_inc_return(&rblk->data_cmnt_size);
+		if (unlikely(cmnt_size == lun->nr_pages_per_blk))
+			rrpc_run_gc(rrpc, rblk);
+	}
 }
 
 static void rrpc_end_io(struct nvm_rq *rqd, int error)
 {
 	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
+	uint8_t npages = rqd->npages;
+	sector_t l_addr = nvm_get_laddr(rqd->bio) - npages;
 
 	if (bio_data_dir(rqd->bio) == WRITE)
-		rrpc_end_io_write(rrpc, rrqd);
+		rrpc_end_io_write(rrpc, rrqd, l_addr, npages);
 
 	if (rrqd->flags & NVM_IOTYPE_GC)
 		return;
 
 	rrpc_unlock_rq(rrpc, rqd->bio, rqd);
+	bio_put(rqd->bio);
+
+	if (npages > 1)
+		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+
+
 	mempool_free(rqd, rrpc->rq_pool);
+}
+
+static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
+			struct nvm_rq *rqd, unsigned long flags, int npages)
+{
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
+	struct nvm_addr *gp;
+	sector_t l_addr = nvm_get_laddr(bio);
+	int is_gc = flags & NVM_IOTYPE_GC;
+	int i;
+
+	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd)) {
+		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+		return NVM_IO_REQUEUE;
+	}
+
+	for (i = 0; i < npages; i++) {
+		/* We assume that mapping occurs at 4KB granurality */
+		BUG_ON(!(l_addr + i >= 0 && l_addr + i < rrpc->nr_pages));
+		gp = &rrpc->trans_map[l_addr + i];
+
+		if (gp->block) {
+			rqd->ppa_list[i] = gp->addr;
+		} else {
+			BUG_ON(is_gc);
+			rrpc_unlock_laddr_range(rrpc, l_addr, i, r);
+			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+							rqd->dma_ppa_list);
+			return NVM_IO_DONE;
+		}
+	}
+
+	return NVM_IO_OK;
 }
 
 static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
@@ -648,7 +701,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 	gp = &rrpc->trans_map[l_addr];
 
 	if (gp->rblk) {
-		rqd->phys_sector = nvm_get_sector(gp->addr);
+		rqd->ppa = nvm_get_sector(gp->addr);
 	} else {
 		BUG_ON(is_gc);
 		rrpc_unlock_rq(rrpc, bio, rqd);
@@ -656,6 +709,38 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 	}
 
 	rrqd->addr = gp;
+
+	return NVM_IO_OK;
+}
+
+static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
+			struct nvm_rq *rqd, unsigned long flags, int npages)
+{
+	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
+	struct nvm_addr *p;
+	sector_t l_addr = nvm_get_laddr(bio);
+	int is_gc = flags & NVM_IOTYPE_GC;
+	int i;
+
+	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd)) {
+		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+		return NVM_IO_REQUEUE;
+	}
+
+	for (i = 0; i < npages; i++) {
+		/* We assume that mapping occurs at 4KB granurality */
+		p = rrpc_map_page(rrpc, l_addr + i, is_gc);
+		if (!p) {
+			BUG_ON(is_gc);
+			rrpc_unlock_laddr_range(rrpc, l_addr, i, r);
+			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+							rqd->dma_ppa_list);
+			rrpc_gc_kick(rrpc);
+			return NVM_IO_REQUEUE;
+		}
+
+		rqd->ppa_list[i] = p->addr;
+	}
 
 	return NVM_IO_OK;
 }
@@ -679,15 +764,30 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 		return NVM_IO_REQUEUE;
 	}
 
-	rqd->phys_sector = nvm_get_sector(p->addr);
+	rqd->ppa = nvm_get_sector(p->addr);
 	rrqd->addr = p;
 
 	return NVM_IO_OK;
 }
 
 static int rrpc_setup_rq(struct rrpc *rrpc, struct bio *bio,
-				struct nvm_rq *rqd, unsigned long flags)
+			struct nvm_rq *rqd, unsigned long flags, uint8_t npages)
 {
+	if (npages > 1) {
+		rqd->ppa_list = nvm_alloc_ppalist(rrpc->dev, GFP_KERNEL,
+							&rqd->dma_ppa_list);
+		if (!rqd->ppa_list) {
+			pr_err("rrpc: not able to allocate ppa list\n");
+			return NVM_IO_ERR;
+		}
+
+		if (bio_rw(bio) == WRITE)
+			return rrpc_write_ppalist_rq(rrpc, bio, rqd, flags,
+									npages);
+
+		return rrpc_read_ppalist_rq(rrpc, bio, rqd, flags, npages);
+	}
+
 	if (bio_rw(bio) == WRITE)
 		return rrpc_write_rq(rrpc, bio, rqd, flags);
 
@@ -699,18 +799,23 @@ static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 {
 	int err;
 	struct rrpc_rq *rrq = nvm_rq_to_pdu(rqd);
+	uint8_t npages = nvm_get_pages(bio);
 
-	err = rrpc_setup_rq(rrpc, bio, rqd, flags);
+	err = rrpc_setup_rq(rrpc, bio, rqd, flags, npages);
 	if (err)
 		return err;
 
+	bio_get(bio);
 	rqd->bio = bio;
 	rqd->ins = &rrpc->instance;
+	rqd->npages = npages;
 	rrq->flags = flags;
 
 	err = nvm_submit_io(rrpc->dev, rqd);
-	if (err)
+	if (err) {
+		pr_err("rrpc: IO submission failed: %d\n", err);
 		return NVM_IO_ERR;
+	}
 
 	return NVM_IO_OK;
 }
@@ -738,6 +843,9 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 	case NVM_IO_OK:
 		return;
 	case NVM_IO_ERR:
+		if (rqd->ppa_list)
+			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+							rqd->dma_ppa_list);
 		bio_io_error(bio);
 		break;
 	case NVM_IO_DONE:

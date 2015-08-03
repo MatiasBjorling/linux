@@ -216,6 +216,23 @@ static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
 	return rrpc_lock_laddr(rrpc, laddr, pages, r);
 }
 
+static inline void rrpc_unlock_laddr_range(struct rrpc *rrpc, sector_t laddr,
+				uint8_t pages, struct rrpc_inflight_rq *r)
+{
+	struct nvm_inflight *map;
+	unsigned long flags;
+	uint8_t i;
+
+	for (i = 0; i <= pages; i++) {
+		BUG_ON((laddr + i + pages) > rrpc->nr_pages);
+		map = &rrpc->inflight_map[(laddr + i) % NVM_INFLIGHT_PARTITIONS];
+
+		spin_lock_irqsave(&map->lock, flags);
+		list_del_init(&r->list);
+		spin_unlock_irqrestore(&map->lock, flags);
+	}
+}
+
 static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 				    struct rrpc_inflight_rq *r)
 {
