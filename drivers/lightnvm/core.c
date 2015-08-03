@@ -70,6 +70,21 @@ void nvm_unregister_target(struct nvm_tgt_type *tt)
 }
 EXPORT_SYMBOL(nvm_unregister_target);
 
+void *nvm_alloc_ppalist(struct nvm_dev *dev, gfp_t mem_flags,
+							dma_addr_t *dma_handler)
+{
+	return dev->ops->alloc_ppalist(dev->q, dev->ppalist_pool, mem_flags,
+								dma_handler);
+}
+EXPORT_SYMBOL(nvm_alloc_ppalist);
+
+void nvm_free_ppalist(struct nvm_dev *dev, void *ppa_list,
+							dma_addr_t dma_handler)
+{
+	dev->ops->free_ppalist(dev->ppalist_pool, ppa_list, dma_handler);
+}
+EXPORT_SYMBOL(nvm_free_ppalist);
+
 struct nvm_bm_type *nvm_find_bm_type(const char *name)
 {
 	struct nvm_bm_type *bt;
@@ -263,6 +278,8 @@ err:
 
 void nvm_exit(struct nvm_dev *dev)
 {
+	if (dev->ppalist_pool)
+		dev->ops->destroy_ppa_pool(dev->ppalist_pool);
 	nvm_free(dev);
 
 	pr_info("nvm: successfully unloaded\n");
@@ -324,8 +341,7 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 	tdisk->private_data = targetdata;
 	tqueue->queuedata = targetdata;
 
-	/* missing support for multi-page IOs. */
-	blk_queue_max_hw_sectors(tqueue, 8);
+	blk_queue_max_hw_sectors(tqueue, 8 * dev->ops->max_phys_sect);
 
 	set_capacity(tdisk, tt->capacity(targetdata));
 	add_disk(tdisk);
@@ -534,6 +550,20 @@ int nvm_register(struct request_queue *q, char *disk_name,
 	down_write(&nvm_lock);
 	list_add(&dev->devices, &nvm_devices);
 	up_write(&nvm_lock);
+
+	if (dev->ops->max_phys_sect > 256) {
+		dev_info(dev, "Maximum number of sectors supported in target "
+					"is 256. max_phys_sect set to 256\n");
+		dev->ops->max_phys_sect = 256;
+	}
+
+	if (dev->ops->max_phys_sect > 1) {
+		dev->ppalist_pool = dev->ops->create_ppa_pool(dev->q);
+		if (!dev->ppalist_pool) {
+			pr_err("nvm: could not create ppa pool\n");
+			return -ENOMEM;
+		}
+	}
 
 	return 0;
 err_init:

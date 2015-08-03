@@ -16,6 +16,7 @@ enum {
 #include <linux/blkdev.h>
 #include <linux/types.h>
 #include <linux/file.h>
+#include <linux/dmapool.h>
 
 enum {
 	/* HW Responsibilities */
@@ -79,7 +80,13 @@ struct nvm_tgt_instance {
 struct nvm_rq {
 	struct nvm_tgt_instance *ins;
 	struct bio *bio;
-	sector_t phys_sector;
+	union {
+		sector_t ppa;
+		sector_t *ppa_list;
+	};
+	/*DMA handler to be used by underlying devices supporting DMA*/
+	dma_addr_t dma_ppa_list;
+	uint8_t npages;
 };
 
 static inline struct nvm_rq *nvm_rq_from_pdu(void *pdu)
@@ -106,6 +113,11 @@ typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct nvm_rq *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
+typedef void *(nvm_create_ppapool_fn)(struct request_queue *);
+typedef void (nvm_destroy_ppapool_fn)(void *);
+typedef void *(nvm_alloc_ppalist_fn)(struct request_queue *, void *, gfp_t,
+								dma_addr_t*);
+typedef void (nvm_free_ppalist_fn)(void *, void*, dma_addr_t);
 
 struct nvm_dev_ops {
 	nvm_id_fn		*identify;
@@ -117,6 +129,13 @@ struct nvm_dev_ops {
 
 	nvm_submit_io_fn	*submit_io;
 	nvm_erase_blk_fn	*erase_block;
+
+	nvm_create_ppapool_fn	*create_ppa_pool;
+	nvm_destroy_ppapool_fn	*destroy_ppa_pool;
+	nvm_alloc_ppalist_fn	*alloc_ppalist;
+	nvm_free_ppalist_fn	*free_ppalist;
+
+	uint8_t			max_phys_sect;
 };
 
 struct nvm_lun {
@@ -162,6 +181,8 @@ struct nvm_dev {
 
 	uint32_t sector_size;
 
+	void *ppalist_pool;
+
 	/* Identity */
 	struct nvm_id identity;
 	struct nvm_get_features features;
@@ -196,6 +217,9 @@ struct nvm_tgt_type {
 
 extern int nvm_register_target(struct nvm_tgt_type *);
 extern void nvm_unregister_target(struct nvm_tgt_type *);
+
+extern void *nvm_alloc_ppalist(struct nvm_dev *, gfp_t, dma_addr_t *);
+extern void nvm_free_ppalist(struct nvm_dev *, void *, dma_addr_t);
 
 typedef int (nvm_bm_register_fn)(struct nvm_dev *);
 typedef void (nvm_bm_unregister_fn)(struct nvm_dev *);
