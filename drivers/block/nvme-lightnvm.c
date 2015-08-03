@@ -410,8 +410,12 @@ static inline void nvme_nvm_rqtocmd(struct request *rq, struct nvm_rq *rqd,
 						rqd->bio->bi_iter.bi_sector));
 	c->nvm_hb_rw.length = cpu_to_le16(
 		(blk_rq_bytes(rq) >> ns->lba_shift) - 1);
-	c->nvm_hb_rw.phys_addr =
-		cpu_to_le64(nvme_block_nr(ns, rqd->phys_sector));
+
+	if (rqd->npages == 1)
+		c->nvm_hb_rw.phys_addr =
+				cpu_to_le64(nvme_block_nr(ns, rqd->ppa));
+	else
+		c->nvm_hb_rw.phys_addr = cpu_to_le64(rqd->dma_ppa_list);
 }
 
 static void nvme_nvm_end_io(struct request *rq, int error)
@@ -419,7 +423,7 @@ static void nvme_nvm_end_io(struct request *rq, int error)
 	struct nvm_rq *rqd = rq->end_io_data;
 	struct nvm_tgt_instance *ins = rqd->ins;
 
-	ins->tt->end_io(rq->end_io_data, error);
+	ins->tt->end_io(rqd, error);
 
 	kfree(rq->cmd);
 	blk_mq_free_request(rq);
@@ -476,6 +480,54 @@ static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
 	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
+static void *nvme_nvm_create_ppa_pool(struct request_queue *q)
+{
+	struct nvme_ns *ns = q->queuedata;
+	struct nvme_dev *dev = ns->dev;
+	struct dma_pool *dma_pool;
+
+	dma_pool = dma_pool_create("ppa list", dev->dev, PAGE_SIZE, PAGE_SIZE,
+									0);
+	if (!dma_pool) {
+		dev_err(dev->dev, "Unable to create DMA pool\n");
+		return NULL;
+	}
+
+	return dma_pool;
+}
+
+static void nvme_nvm_destroy_ppa_pool(void *pool)
+{
+	struct dma_pool *dma_pool = (struct dma_pool*)pool;
+
+	dma_pool_destroy(dma_pool);
+}
+
+static void *nvme_nvm_alloc_ppalist(struct request_queue *q, void *pool,
+					gfp_t mem_flags, dma_addr_t *dma_handler)
+{
+	struct nvme_ns *ns = q->queuedata;
+	struct nvme_dev *dev = ns->dev;
+	struct sector_t *ppa_list;
+	struct dma_pool *ppalist_pool = (struct dma_pool*)pool;
+
+	ppa_list = dma_pool_alloc(ppalist_pool, mem_flags, dma_handler);
+	if (!ppa_list) {
+		dev_err(dev->dev, "Unable to allocate DMA\n");
+		return NULL;
+	}
+
+	return ppa_list;
+}
+
+static void nvme_nvm_free_ppalist(void *pool, void *ppa_list,
+							dma_addr_t dma_handler)
+{
+	struct dma_pool *ppalist_pool = (struct dma_pool*)pool;
+
+	dma_pool_free(ppalist_pool, ppa_list, dma_handler);
+}
+
 static struct nvm_dev_ops nvme_nvm_dev_ops = {
 	.identify		= nvme_nvm_identify,
 
@@ -489,6 +541,13 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 
 	.submit_io		= nvme_nvm_submit_io,
 	.erase_block		= nvme_nvm_erase_block,
+
+	.create_ppa_pool	= nvme_nvm_create_ppa_pool,
+	.destroy_ppa_pool	= nvme_nvm_destroy_ppa_pool,
+	.alloc_ppalist		= nvme_nvm_alloc_ppalist,
+	.free_ppalist		= nvme_nvm_free_ppalist,
+
+	.max_phys_sect		= 64,
 };
 
 int nvme_nvm_register(struct request_queue *q, char *disk_name)
