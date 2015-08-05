@@ -135,15 +135,7 @@ struct nvm_block {
 	struct list_head list;
 	struct nvm_lun *lun;
 
-	union {
-		struct {
-			unsigned long type :1; /* blk used if set */
-			unsigned long blk :27; /* blkid */
-			unsigned long pg :36; /* pgid */
-		} id_hb;
-		unsigned long long id;
-	};
-
+	unsigned long long id;
 	int type;
 
 	void *priv;
