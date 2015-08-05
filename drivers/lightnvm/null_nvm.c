@@ -13,6 +13,7 @@
 #include <linux/hrtimer.h>
 #include <linux/lightnvm.h>
 
+static struct kmem_cache *ppa_cache;
 struct nulln_cmd {
 	struct llist_node ll_list;
 	struct request *rq;
@@ -259,10 +260,69 @@ static int null_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 	return 0;
 }
 
+static void *null_create_ppa_pool(struct request_queue *q)
+{
+	mempool_t *virtmem_pool;
+
+	ppa_cache = kmem_cache_create("ppa_list", PAGE_SIZE, 0, 0, NULL);
+	if (!ppa_cache) {
+		pr_err("null_nvm: Unable to craete kmem cache\n");
+		return NULL;
+	}
+
+	virtmem_pool = mempool_create_slab_pool(64, ppa_cache);
+	if (!virtmem_pool) {
+		pr_err("null_nvm: Unable to create virtual memory pool\n");
+		return NULL;
+	}
+
+	return virtmem_pool;
+}
+
+static void null_destroy_ppa_pool(void *pool)
+{
+	mempool_t *virtmem_pool = (mempool_t*)pool;
+
+	mempool_destroy(virtmem_pool);
+}
+
+static void *null_alloc_ppalist(struct request_queue *q, void *pool,
+					gfp_t mem_flags, dma_addr_t *dma_handler)
+{
+
+	struct sector_t *ppa_list;
+	mempool_t *virtmem_pool = (mempool_t*)pool;
+
+	ppa_list = mempool_alloc(virtmem_pool, mem_flags);
+	if (!ppa_list) {
+		pr_err("null_nvm: Unable to allocate virtual memory\n");
+		return NULL;
+	}
+
+	return ppa_list;
+}
+
+static void null_free_ppalist(void *pool, void *ppa_list, dma_addr_t dma_handler)
+{
+	mempool_t *virtmem_pool = (mempool_t*)pool;
+
+	mempool_free(ppa_list, virtmem_pool);
+}
+
 static struct nvm_dev_ops nulln_dev_ops = {
 	.identify	= null_id,
-	.get_features	= null_get_features,
-	.submit_io	= null_submit_io,
+
+	.get_features		= null_get_features,
+
+	.submit_io		= null_submit_io,
+
+	.create_ppa_pool	= null_create_ppa_pool,
+	.destroy_ppa_pool	= null_destroy_ppa_pool,
+	.alloc_ppalist		= null_alloc_ppalist,
+	.free_ppalist		= null_free_ppalist,
+
+	/* Emulate nvme protocol */
+	.max_phys_sect		= 64,
 };
 
 static int null_queue_rq(struct blk_mq_hw_ctx *hctx,
