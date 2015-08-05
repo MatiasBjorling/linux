@@ -552,9 +552,9 @@ int nvm_register(struct request_queue *q, char *disk_name,
 	up_write(&nvm_lock);
 
 	if (dev->ops->max_phys_sect > 256) {
-		dev_info(dev, "Maximum number of sectors supported in target "
-					"is 256. max_phys_sect set to 256\n");
-		dev->ops->max_phys_sect = 256;
+		pr_info("nvm: maximum number of sectors supported in target "
+					"is 255. max_phys_sect set to 255\n");
+		dev->ops->max_phys_sect = 255;
 	}
 
 	if (dev->ops->max_phys_sect > 1) {
