@@ -594,7 +594,7 @@ err:
 	return NULL;
 }
 
-static void rrpc_run_gc(struct rrpc *rrpc, struct rrpc_block *block)
+static void rrpc_run_gc(struct rrpc *rrpc, struct rrpc_block *rblk)
 {
 	struct rrpc_block_gc *gcb;
 
@@ -657,7 +657,7 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 			struct nvm_rq *rqd, unsigned long flags, int npages)
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
-	struct nvm_addr *gp;
+	struct rrpc_addr *gp;
 	sector_t l_addr = nvm_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
@@ -668,11 +668,11 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 	}
 
 	for (i = 0; i < npages; i++) {
-		/* We assume that mapping occurs at 4KB granurality */
+		/* We assume that mapping occurs at 4KB granularity */
 		BUG_ON(!(l_addr + i >= 0 && l_addr + i < rrpc->nr_pages));
 		gp = &rrpc->trans_map[l_addr + i];
 
-		if (gp->block) {
+		if (gp->rblk) {
 			rqd->ppa_list[i] = gp->addr;
 		} else {
 			BUG_ON(is_gc);
@@ -717,7 +717,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 			struct nvm_rq *rqd, unsigned long flags, int npages)
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
-	struct nvm_addr *p;
+	struct rrpc_addr *p;
 	sector_t l_addr = nvm_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
@@ -728,7 +728,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 	}
 
 	for (i = 0; i < npages; i++) {
-		/* We assume that mapping occurs at 4KB granurality */
+		/* We assume that mapping occurs at 4KB granularity */
 		p = rrpc_map_page(rrpc, l_addr + i, is_gc);
 		if (!p) {
 			BUG_ON(is_gc);
