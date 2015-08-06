@@ -26,28 +26,24 @@ static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 		for ((i) = 0, rlun = &(rrpc)->luns[0]; \
 			(i) < (rrpc)->nr_luns; (i)++, rlun = &(rrpc)->luns[(i)])
 
-static void invalidate_block_page(struct rrpc_addr *p)
+static void rrpc_page_invalidate(struct rrpc *rrpc, struct rrpc_addr *a)
 {
-	struct rrpc_block *rblk = p->rblk;
+	struct rrpc_block *rblk = a->rblk;
 	unsigned int pg_offset;
 
-	if (!rblk)
+	lockdep_assert_held(&rrpc->rev_lock);
+
+	if (a->addr == ADDR_EMPTY || !rblk)
 		return;
 
 	spin_lock(&rblk->lock);
-	pg_offset = p->addr % rblk->parent->lun->nr_pages_per_blk;
+
+	pg_offset = a->addr % rblk->parent->lun->nr_pages_per_blk;
 	WARN_ON(test_and_set_bit(pg_offset, rblk->invalid_pages));
 	rblk->nr_invalid_pages++;
+
 	spin_unlock(&rblk->lock);
-}
 
-static inline void __nvm_page_invalidate(struct rrpc *rrpc, struct rrpc_addr *a)
-{
-	BUG_ON(!spin_is_locked(&rrpc->rev_lock));
-	if (a->addr == ADDR_EMPTY)
-		return;
-
-	invalidate_block_page(a);
 	rrpc->rev_trans_map[a->addr - rrpc->poffset].addr = ADDR_EMPTY;
 }
 
@@ -60,7 +56,7 @@ static void rrpc_invalidate_range(struct rrpc *rrpc, sector_t slba,
 	for (i = slba; i < slba + len; i++) {
 		struct rrpc_addr *gp = &rrpc->trans_map[i];
 
-		__nvm_page_invalidate(rrpc, gp);
+		rrpc_page_invalidate(rrpc, gp);
 		gp->rblk = NULL;
 	}
 	spin_unlock(&rrpc->rev_lock);
@@ -436,7 +432,7 @@ static const struct block_device_operations rrpc_fops = {
 	.owner		= THIS_MODULE,
 };
 
-static struct rrpc_lun *__rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
+static struct rrpc_lun *rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
 {
 	unsigned int i;
 	struct rrpc_lun *rlun, *max_free;
@@ -459,19 +455,8 @@ static struct rrpc_lun *__rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
 	return max_free;
 }
 
-static inline void __rrpc_page_invalidate(struct rrpc *rrpc,
-							struct rrpc_addr *gp)
-{
-	BUG_ON(!spin_is_locked(&rrpc->rev_lock));
-	if (gp->addr == ADDR_EMPTY)
-		return;
-
-	invalidate_block_page(gp);
-	rrpc->rev_trans_map[gp->addr - rrpc->poffset].addr = ADDR_EMPTY;
-}
-
-struct rrpc_addr *nvm_update_map(struct rrpc *rrpc, sector_t l_addr,
-			struct rrpc_block *p_block, sector_t p_addr, int is_gc)
+static struct rrpc_addr *rrpc_update_map(struct rrpc *rrpc, sector_t l_addr,
+			struct rrpc_block *rblk, sector_t paddr, int is_gc)
 {
 	struct rrpc_addr *gp;
 	struct rrpc_rev_addr *rev;
@@ -481,10 +466,10 @@ struct rrpc_addr *nvm_update_map(struct rrpc *rrpc, sector_t l_addr,
 	gp = &rrpc->trans_map[l_addr];
 	spin_lock(&rrpc->rev_lock);
 	if (gp->rblk)
-		__nvm_page_invalidate(rrpc, gp);
+		rrpc_page_invalidate(rrpc, gp);
 
-	gp->addr = p_addr;
-	gp->rblk = p_block;
+	gp->addr = paddr;
+	gp->rblk = rblk;
 
 	rev = &rrpc->rev_trans_map[gp->addr - rrpc->poffset];
 	rev->addr = l_addr;
@@ -493,7 +478,7 @@ struct rrpc_addr *nvm_update_map(struct rrpc *rrpc, sector_t l_addr,
 	return gp;
 }
 
-sector_t rrpc_alloc_addr(struct rrpc_lun *rlun, struct rrpc_block *rblk)
+static sector_t rrpc_alloc_addr(struct rrpc_lun *rlun, struct rrpc_block *rblk)
 {
 	sector_t addr = ADDR_EMPTY;
 
@@ -521,11 +506,11 @@ static struct rrpc_addr *rrpc_map_page(struct rrpc *rrpc, sector_t laddr,
 								int is_gc)
 {
 	struct rrpc_lun *rlun;
+	struct rrpc_block *rblk;
 	struct nvm_lun *lun;
-	struct rrpc_block *p_block;
-	sector_t p_addr;
+	sector_t paddr;
 
-	rlun = __rrpc_get_lun_rr(rrpc, is_gc);
+	rlun = rrpc_get_lun_rr(rrpc, is_gc);
 	lun = rlun->parent;
 
 	if (!is_gc && lun->nr_free_blocks < rrpc->nr_luns * 4)
@@ -533,44 +518,41 @@ static struct rrpc_addr *rrpc_map_page(struct rrpc *rrpc, sector_t laddr,
 
 	spin_lock(&rlun->lock);
 
-	p_block = rlun->cur;
-	p_addr = rrpc_alloc_addr(rlun, p_block);
+	rblk = rlun->cur;
+	paddr = rrpc_alloc_addr(rlun, rblk);
 
-	if (p_addr == ADDR_EMPTY) {
-		p_block = rrpc_get_blk(rrpc, rlun, 0);
+	if (paddr == ADDR_EMPTY) {
+		rblk = rrpc_get_blk(rrpc, rlun, 0);
 
-		if (!p_block) {
+		if (!rblk) {
 			if (is_gc) {
-				p_addr = rrpc_alloc_addr(rlun, rlun->gc_cur);
-				if (p_addr == ADDR_EMPTY) {
-					p_block =
+				paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
+				if (paddr == ADDR_EMPTY) {
+					rblk =
 					       rrpc_get_blk(rrpc, rlun, 1);
-					if (!p_block) {
+					if (!rblk) {
 						pr_err("rrpc: no more blocks");
 						goto finished;
 					} else {
-						rlun->gc_cur = p_block;
-						p_addr = rrpc_alloc_addr(rlun, rlun->gc_cur);
+						rlun->gc_cur = rblk;
+						paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
 					}
 				}
-				p_block = rlun->gc_cur;
+				rblk = rlun->gc_cur;
 			}
 			goto finished;
 		}
 
-		rrpc_set_lun_cur(rlun, p_block);
-		p_addr = rrpc_alloc_addr(rlun, p_block);
+		rrpc_set_lun_cur(rlun, rblk);
+		paddr = rrpc_alloc_addr(rlun, rblk);
 	}
 
 finished:
-	if (p_addr == ADDR_EMPTY)
+	if (paddr == ADDR_EMPTY)
 		goto err;
 
-	if (!p_block)
-		WARN_ON(is_gc);
-
 	spin_unlock(&rlun->lock);
-	return nvm_update_map(rrpc, laddr, p_block, p_addr, is_gc);
+	return rrpc_update_map(rrpc, laddr, rblk, paddr, is_gc);
 err:
 	spin_unlock(&rlun->lock);
 	return NULL;
