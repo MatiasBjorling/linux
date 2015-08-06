@@ -268,7 +268,7 @@ try:
 		spin_unlock(&rrpc->rev_lock);
 
 		/* Perform read to do GC */
-		bio->bi_iter.bi_sector = nvm_get_sector(rev->addr);
+		bio->bi_iter.bi_sector = rrpc_get_sector(rev->addr);
 		bio->bi_rw = READ;
 		bio->bi_private = &wait;
 		bio->bi_end_io = rrpc_end_sync_bio;
@@ -286,7 +286,7 @@ try:
 		bio_reset(bio);
 		reinit_completion(&wait);
 
-		bio->bi_iter.bi_sector = nvm_get_sector(rev->addr);
+		bio->bi_iter.bi_sector = rrpc_get_sector(rev->addr);
 		bio->bi_rw = WRITE;
 		bio->bi_private = &wait;
 		bio->bi_end_io = rrpc_end_sync_bio;
@@ -594,7 +594,7 @@ static void rrpc_end_io(struct nvm_rq *rqd, int error)
 	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	uint8_t npages = rqd->npages;
-	sector_t l_addr = nvm_get_laddr(rqd->bio) - npages;
+	sector_t l_addr = rrpc_get_laddr(rqd->bio) - npages;
 
 	if (bio_data_dir(rqd->bio) == WRITE)
 		rrpc_end_io_write(rrpc, rrqd, l_addr, npages);
@@ -617,7 +617,7 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 	struct rrpc_addr *gp;
-	sector_t l_addr = nvm_get_laddr(bio);
+	sector_t l_addr = rrpc_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
 
@@ -650,7 +650,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 {
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	int is_gc = flags & NVM_IOTYPE_GC;
-	sector_t l_addr = nvm_get_laddr(bio);
+	sector_t l_addr = rrpc_get_laddr(bio);
 	struct rrpc_addr *gp;
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
@@ -660,7 +660,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 	gp = &rrpc->trans_map[l_addr];
 
 	if (gp->rblk) {
-		rqd->ppa = nvm_get_sector(gp->addr);
+		rqd->ppa = rrpc_get_sector(gp->addr);
 	} else {
 		BUG_ON(is_gc);
 		rrpc_unlock_rq(rrpc, bio, rqd);
@@ -677,7 +677,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 	struct rrpc_addr *p;
-	sector_t l_addr = nvm_get_laddr(bio);
+	sector_t l_addr = rrpc_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
 
@@ -710,7 +710,7 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	struct rrpc_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
-	sector_t l_addr = nvm_get_laddr(bio);
+	sector_t l_addr = rrpc_get_laddr(bio);
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
 		return NVM_IO_REQUEUE;
@@ -723,7 +723,7 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 		return NVM_IO_REQUEUE;
 	}
 
-	rqd->ppa = nvm_get_sector(p->addr);
+	rqd->ppa = rrpc_get_sector(p->addr);
 	rrqd->addr = p;
 
 	return NVM_IO_OK;
@@ -758,7 +758,7 @@ static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 {
 	int err;
 	struct rrpc_rq *rrq = nvm_rq_to_pdu(rqd);
-	uint8_t npages = nvm_get_pages(bio);
+	uint8_t npages = rrpc_get_pages(bio);
 
 	err = rrpc_setup_rq(rrpc, bio, rqd, flags, npages);
 	if (err)
@@ -999,8 +999,8 @@ static int rrpc_core_init(struct rrpc *rrpc)
 	if (!rrpc->rq_pool)
 		return -ENOMEM;
 
-	for (i = 0; i < NVM_INFLIGHT_PARTITIONS; i++) {
-		struct nvm_inflight *map = &rrpc->inflight_map[i];
+	for (i = 0; i < RRPC_INFLIGHT_PARTS; i++) {
+		struct rrpc_inflight *map = &rrpc->inflight_map[i];
 
 		spin_lock_init(&map->lock);
 		INIT_LIST_HEAD(&map->reqs);

@@ -28,13 +28,13 @@
 
 /* We partition the namespace of translation map into these pieces for tracking
  * in-flight addresses. */
-#define NVM_INFLIGHT_PARTITIONS 1
+#define RRPC_INFLIGHT_PARTS 1
 
 /* Run only GC if less than 1/X blocks are free */
 #define GC_LIMIT_INVERSE 10
 #define GC_TIME_SECS 100
 
-struct nvm_inflight {
+struct rrpc_inflight {
 	spinlock_t lock;
 	struct list_head reqs;
 };
@@ -114,7 +114,7 @@ struct rrpc {
 	struct rrpc_rev_addr *rev_trans_map;
 	spinlock_t rev_lock;
 
-	struct nvm_inflight inflight_map[NVM_INFLIGHT_PARTITIONS];
+	struct rrpc_inflight inflight_map[RRPC_INFLIGHT_PARTS];
 
 	mempool_t *addr_pool;
 	mempool_t *page_pool;
@@ -143,17 +143,17 @@ struct rrpc_rev_addr {
 	sector_t addr;
 };
 
-static inline sector_t nvm_get_laddr(struct bio *bio)
+static inline sector_t rrpc_get_laddr(struct bio *bio)
 {
 	return bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
 }
 
-static inline unsigned int nvm_get_pages(struct bio *bio)
+static inline unsigned int rrpc_get_pages(struct bio *bio)
 {
 	return  bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
 }
 
-static inline sector_t nvm_get_sector(sector_t laddr)
+static inline sector_t rrpc_get_sector(sector_t laddr)
 {
 	return laddr * NR_PHY_IN_LOG;
 }
@@ -168,8 +168,8 @@ static inline int request_intersects(struct rrpc_inflight_rq *r,
 static int __rrpc_lock_laddr(struct rrpc *rrpc, sector_t laddr,
 			     unsigned pages, struct rrpc_inflight_rq *r)
 {
-	struct nvm_inflight *map =
-			&rrpc->inflight_map[laddr % NVM_INFLIGHT_PARTITIONS];
+	struct rrpc_inflight *map =
+			&rrpc->inflight_map[laddr % RRPC_INFLIGHT_PARTS];
 	sector_t laddr_end = laddr + pages - 1;
 	struct rrpc_inflight_rq *rtmp;
 
@@ -209,8 +209,8 @@ static inline struct rrpc_inflight_rq *rrpc_get_inflight_rq(struct nvm_rq *rqd)
 static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
 							struct nvm_rq *rqd)
 {
-	sector_t laddr = nvm_get_laddr(bio);
-	unsigned int pages = nvm_get_pages(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
+	unsigned int pages = rrpc_get_pages(bio);
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 
 	return rrpc_lock_laddr(rrpc, laddr, pages, r);
@@ -219,13 +219,13 @@ static inline int rrpc_lock_rq(struct rrpc *rrpc, struct bio *bio,
 static inline void rrpc_unlock_laddr_range(struct rrpc *rrpc, sector_t laddr,
 				uint8_t pages, struct rrpc_inflight_rq *r)
 {
-	struct nvm_inflight *map;
+	struct rrpc_inflight *map;
 	unsigned long flags;
 	uint8_t i;
 
 	for (i = 0; i <= pages; i++) {
 		BUG_ON((laddr + i + pages) > rrpc->nr_pages);
-		map = &rrpc->inflight_map[(laddr + i) % NVM_INFLIGHT_PARTITIONS];
+		map = &rrpc->inflight_map[(laddr + i) % RRPC_INFLIGHT_PARTS];
 
 		spin_lock_irqsave(&map->lock, flags);
 		list_del_init(&r->list);
@@ -236,8 +236,8 @@ static inline void rrpc_unlock_laddr_range(struct rrpc *rrpc, sector_t laddr,
 static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 				    struct rrpc_inflight_rq *r)
 {
-	struct nvm_inflight *map =
-			&rrpc->inflight_map[laddr % NVM_INFLIGHT_PARTITIONS];
+	struct rrpc_inflight *map =
+			&rrpc->inflight_map[laddr % RRPC_INFLIGHT_PARTS];
 	unsigned long flags;
 
 	spin_lock_irqsave(&map->lock, flags);
@@ -248,8 +248,8 @@ static inline void rrpc_unlock_laddr(struct rrpc *rrpc, sector_t laddr,
 static inline void rrpc_unlock_rq(struct rrpc *rrpc, struct bio *bio,
 							struct nvm_rq *rqd)
 {
-	sector_t laddr = nvm_get_laddr(bio);
-	unsigned int pages = nvm_get_pages(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
+	unsigned int pages = rrpc_get_pages(bio);
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 
 	BUG_ON((laddr + pages) > rrpc->nr_pages);
