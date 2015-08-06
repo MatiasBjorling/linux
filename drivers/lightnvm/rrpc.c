@@ -432,26 +432,8 @@ static void rrpc_gc_queue(struct work_struct *work)
 							rblk->parent->id);
 }
 
-static int rrpc_ioctl(struct block_device *bdev, fmode_t mode, unsigned int cmd,
-							unsigned long arg)
-{
-	return 0;
-}
-
-static int rrpc_open(struct block_device *bdev, fmode_t mode)
-{
-	return 0;
-}
-
-static void rrpc_release(struct gendisk *disk, fmode_t mode)
-{
-}
-
 static const struct block_device_operations rrpc_fops = {
 	.owner		= THIS_MODULE,
-	.ioctl		= rrpc_ioctl,
-	.open		= rrpc_open,
-	.release	= rrpc_release,
 };
 
 static struct rrpc_lun *__rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
