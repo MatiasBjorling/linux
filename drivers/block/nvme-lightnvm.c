@@ -498,18 +498,18 @@ static void *nvme_nvm_create_ppa_pool(struct request_queue *q)
 
 static void nvme_nvm_destroy_ppa_pool(void *pool)
 {
-	struct dma_pool *dma_pool = (struct dma_pool*)pool;
+	struct dma_pool *dma_pool = pool;
 
 	dma_pool_destroy(dma_pool);
 }
 
 static void *nvme_nvm_alloc_ppalist(struct request_queue *q, void *pool,
-					gfp_t mem_flags, dma_addr_t *dma_handler)
+				    gfp_t mem_flags, dma_addr_t *dma_handler)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
 	struct sector_t *ppa_list;
-	struct dma_pool *ppalist_pool = (struct dma_pool*)pool;
+	struct dma_pool *ppalist_pool = pool;
 
 	ppa_list = dma_pool_alloc(ppalist_pool, mem_flags, dma_handler);
 	if (!ppa_list) {
@@ -523,7 +523,7 @@ static void *nvme_nvm_alloc_ppalist(struct request_queue *q, void *pool,
 static void nvme_nvm_free_ppalist(void *pool, void *ppa_list,
 							dma_addr_t dma_handler)
 {
-	struct dma_pool *ppalist_pool = (struct dma_pool*)pool;
+	struct dma_pool *ppalist_pool = pool;
 
 	dma_pool_free(ppalist_pool, ppa_list, dma_handler);
 }
