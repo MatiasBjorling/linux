@@ -183,14 +183,9 @@ static void rrpc_gc_kick(struct rrpc *rrpc)
 	}
 }
 
-/**
- * rrpc_gc_timer - default gc timer function.
- * @data: ptr to the 'nvm' structure
- *
- * Description:
- *   rrpc configures a timer to kick the GC to force proactive behavior.
- *
- **/
+/*
+ * timed GC every interval.
+ */
 static void rrpc_gc_timer(unsigned long data)
 {
 	struct rrpc *rrpc = (struct rrpc *)data;
