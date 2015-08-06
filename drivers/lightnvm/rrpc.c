@@ -461,8 +461,6 @@ static struct rrpc_addr *rrpc_update_map(struct rrpc *rrpc, sector_t laddr,
 	struct rrpc_addr *gp;
 	struct rrpc_rev_addr *rev;
 
-	if (laddr >= rrpc->nr_pages)
-		printk("%llu %llu\n", laddr, rrpc->nr_pages);
 	BUG_ON(laddr >= rrpc->nr_pages);
 
 	gp = &rrpc->trans_map[laddr];
@@ -521,37 +519,32 @@ static struct rrpc_addr *rrpc_map_page(struct rrpc *rrpc, sector_t laddr,
 	spin_lock(&rlun->lock);
 
 	rblk = rlun->cur;
+retry:
 	paddr = rrpc_alloc_addr(rlun, rblk);
 
 	if (paddr == ADDR_EMPTY) {
 		rblk = rrpc_get_blk(rrpc, rlun, 0);
-
-		if (!rblk) {
-			if (is_gc) {
-				paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
-				if (paddr == ADDR_EMPTY) {
-					rblk =
-					       rrpc_get_blk(rrpc, rlun, 1);
-					if (!rblk) {
-						pr_err("rrpc: no more blocks");
-						goto finished;
-					} else {
-						rlun->gc_cur = rblk;
-						paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
-					}
-				}
-				rblk = rlun->gc_cur;
-			}
-			goto finished;
+		if (rblk) {
+			rrpc_set_lun_cur(rlun, rblk);
+			goto retry;
 		}
 
-		rrpc_set_lun_cur(rlun, rblk);
-		paddr = rrpc_alloc_addr(rlun, rblk);
-	}
+		if (is_gc) {
+			/* retry from emergency gc block */
+			paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
+			if (paddr == ADDR_EMPTY) {
+				rblk = rrpc_get_blk(rrpc, rlun, 1);
+				if (!rblk) {
+					pr_err("rrpc: no more blocks");
+					goto err;
+				}
 
-finished:
-	if (paddr == ADDR_EMPTY)
-		goto err;
+				rlun->gc_cur = rblk;
+				paddr = rrpc_alloc_addr(rlun, rlun->gc_cur);
+			}
+			rblk = rlun->gc_cur;
+		}
+	}
 
 	spin_unlock(&rlun->lock);
 	return rrpc_update_map(rrpc, laddr, rblk, paddr);
