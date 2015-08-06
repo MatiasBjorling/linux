@@ -108,7 +108,7 @@ static int hw_queue_depth = 64;
 module_param(hw_queue_depth, int, S_IRUGO);
 MODULE_PARM_DESC(hw_queue_depth, "Queue depth for each hardware queue. Default: 64");
 
-static bool use_per_node_hctx = false;
+static bool use_per_node_hctx;
 module_param(use_per_node_hctx, bool, S_IRUGO);
 MODULE_PARM_DESC(use_per_node_hctx, "Use per-node allocation for hardware context queues. Default: false");
 
@@ -281,17 +281,17 @@ static void *null_create_ppa_pool(struct request_queue *q)
 
 static void null_destroy_ppa_pool(void *pool)
 {
-	mempool_t *virtmem_pool = (mempool_t*)pool;
+	mempool_t *virtmem_pool = pool;
 
 	mempool_destroy(virtmem_pool);
 }
 
 static void *null_alloc_ppalist(struct request_queue *q, void *pool,
-					gfp_t mem_flags, dma_addr_t *dma_handler)
+				gfp_t mem_flags, dma_addr_t *dma_handler)
 {
 
 	struct sector_t *ppa_list;
-	mempool_t *virtmem_pool = (mempool_t*)pool;
+	mempool_t *virtmem_pool = pool;
 
 	ppa_list = mempool_alloc(virtmem_pool, mem_flags);
 	if (!ppa_list) {
@@ -302,9 +302,10 @@ static void *null_alloc_ppalist(struct request_queue *q, void *pool,
 	return ppa_list;
 }
 
-static void null_free_ppalist(void *pool, void *ppa_list, dma_addr_t dma_handler)
+static void null_free_ppalist(void *pool, void *ppa_list,
+							dma_addr_t dma_handler)
 {
-	mempool_t *virtmem_pool = (mempool_t*)pool;
+	mempool_t *virtmem_pool = pool;
 
 	mempool_free(ppa_list, virtmem_pool);
 }
