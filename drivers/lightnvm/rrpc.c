@@ -455,15 +455,17 @@ static struct rrpc_lun *rrpc_get_lun_rr(struct rrpc *rrpc, int is_gc)
 	return max_free;
 }
 
-static struct rrpc_addr *rrpc_update_map(struct rrpc *rrpc, sector_t l_addr,
-			struct rrpc_block *rblk, sector_t paddr, int is_gc)
+static struct rrpc_addr *rrpc_update_map(struct rrpc *rrpc, sector_t laddr,
+					struct rrpc_block *rblk, sector_t paddr)
 {
 	struct rrpc_addr *gp;
 	struct rrpc_rev_addr *rev;
 
-	BUG_ON(l_addr >= rrpc->nr_pages);
+	if (laddr >= rrpc->nr_pages)
+		printk("%llu %llu\n", laddr, rrpc->nr_pages);
+	BUG_ON(laddr >= rrpc->nr_pages);
 
-	gp = &rrpc->trans_map[l_addr];
+	gp = &rrpc->trans_map[laddr];
 	spin_lock(&rrpc->rev_lock);
 	if (gp->rblk)
 		rrpc_page_invalidate(rrpc, gp);
@@ -472,7 +474,7 @@ static struct rrpc_addr *rrpc_update_map(struct rrpc *rrpc, sector_t l_addr,
 	gp->rblk = rblk;
 
 	rev = &rrpc->rev_trans_map[gp->addr - rrpc->poffset];
-	rev->addr = l_addr;
+	rev->addr = laddr;
 	spin_unlock(&rrpc->rev_lock);
 
 	return gp;
@@ -552,7 +554,7 @@ finished:
 		goto err;
 
 	spin_unlock(&rlun->lock);
-	return rrpc_update_map(rrpc, laddr, rblk, paddr, is_gc);
+	return rrpc_update_map(rrpc, laddr, rblk, paddr);
 err:
 	spin_unlock(&rlun->lock);
 	return NULL;
