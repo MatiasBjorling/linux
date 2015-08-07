@@ -93,7 +93,7 @@ static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqd)
 static void rrpc_discard(struct rrpc *rrpc, struct bio *bio)
 {
 	sector_t slba = bio->bi_iter.bi_sector / NR_PHY_IN_LOG;
-	sector_t len = bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
+	sector_t len = bio->bi_iter.bi_size / RRPC_EXPOSED_PAGE_SIZE;
 	struct nvm_rq *rqd;
 
 	do {
@@ -269,7 +269,7 @@ try:
 		bio->bi_end_io = rrpc_end_sync_bio;
 
 		/* TODO: may fail when EXP_PG_SIZE > PAGE_SIZE */
-		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
+		bio_add_pc_page(q, bio, page, RRPC_EXPOSED_PAGE_SIZE, 0);
 
 		if (rrpc_submit_io(rrpc, bio, rqd, NVM_IOTYPE_GC)) {
 			pr_err("rrpc: gc read failed.\n");
@@ -286,7 +286,7 @@ try:
 		bio->bi_private = &wait;
 		bio->bi_end_io = rrpc_end_sync_bio;
 
-		bio_add_pc_page(q, bio, page, EXPOSED_PAGE_SIZE, 0);
+		bio_add_pc_page(q, bio, page, RRPC_EXPOSED_PAGE_SIZE, 0);
 
 		/* turn the command around and write the data back to a new
 		 * address */

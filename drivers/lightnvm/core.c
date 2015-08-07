@@ -169,7 +169,7 @@ static void nvm_core_free(struct nvm_dev *dev)
 static int nvm_core_init(struct nvm_dev *dev)
 {
 	dev->nr_luns = dev->identity.nchannels;
-	dev->sector_size = EXPOSED_PAGE_SIZE;
+	dev->sector_size = dev->ops->dev_sector_size;
 	INIT_LIST_HEAD(&dev->online_targets);
 
 	return 0;
@@ -541,6 +541,7 @@ int nvm_register(struct request_queue *q, char *disk_name,
 
 	dev->q = q;
 	dev->ops = ops;
+	dev->ops->dev_sector_size = DEV_EXPOSED_PAGE_SIZE;
 	strncpy(dev->name, disk_name, DISK_NAME_LEN);
 
 	ret = nvm_init(dev);

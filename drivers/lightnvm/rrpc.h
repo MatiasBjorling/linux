@@ -34,6 +34,11 @@
 #define GC_LIMIT_INVERSE 10
 #define GC_TIME_SECS 100
 
+#define RRPC_SECTOR (512)
+#define RRPC_EXPOSED_PAGE_SIZE (4096)
+
+#define NR_PHY_IN_LOG (RRPC_EXPOSED_PAGE_SIZE / RRPC_SECTOR)
+
 struct rrpc_inflight {
 	spinlock_t lock;
 	struct list_head reqs;
@@ -150,7 +155,7 @@ static inline sector_t rrpc_get_laddr(struct bio *bio)
 
 static inline unsigned int rrpc_get_pages(struct bio *bio)
 {
-	return  bio->bi_iter.bi_size / EXPOSED_PAGE_SIZE;
+	return  bio->bi_iter.bi_size / RRPC_EXPOSED_PAGE_SIZE;
 }
 
 static inline sector_t rrpc_get_sector(sector_t laddr)
