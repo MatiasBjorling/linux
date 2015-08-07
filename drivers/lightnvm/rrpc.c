@@ -85,7 +85,7 @@ static void rrpc_inflight_laddr_release(struct rrpc *rrpc, struct nvm_rq *rqd)
 {
 	struct rrpc_inflight_rq *inf = rrpc_get_inflight_rq(rqd);
 
-	rrpc_unlock_laddr(rrpc, inf->l_start, inf);
+	rrpc_unlock_laddr(rrpc, inf);
 
 	mempool_free(rqd, rrpc->rq_pool);
 }
@@ -566,7 +566,7 @@ static void rrpc_run_gc(struct rrpc *rrpc, struct rrpc_block *rblk)
 }
 
 static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd,
-						sector_t l_addr, uint8_t npages)
+						sector_t laddr, uint8_t npages)
 {
 	struct rrpc_addr *p;
 	struct rrpc_block *rblk;
@@ -574,7 +574,7 @@ static void rrpc_end_io_write(struct rrpc *rrpc, struct rrpc_rq *rrqd,
 	int cmnt_size, i;
 
 	for (i = 0; i < npages; i++) {
-		p = &rrpc->trans_map[l_addr + i];
+		p = &rrpc->trans_map[laddr + i];
 		rblk = p->rblk;
 		lun = rblk->parent->lun;
 
@@ -589,15 +589,15 @@ static void rrpc_end_io(struct nvm_rq *rqd, int error)
 	struct rrpc *rrpc = container_of(rqd->ins, struct rrpc, instance);
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	uint8_t npages = rqd->npages;
-	sector_t l_addr = rrpc_get_laddr(rqd->bio) - npages;
+	sector_t laddr = rrpc_get_laddr(rqd->bio) - npages;
 
 	if (bio_data_dir(rqd->bio) == WRITE)
-		rrpc_end_io_write(rrpc, rrqd, l_addr, npages);
+		rrpc_end_io_write(rrpc, rrqd, laddr, npages);
 
 	if (rrqd->flags & NVM_IOTYPE_GC)
 		return;
 
-	rrpc_unlock_rq(rrpc, rqd->bio, rqd);
+	rrpc_unlock_rq(rrpc, rqd);
 	bio_put(rqd->bio);
 
 	if (npages > 1)
@@ -612,7 +612,7 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 	struct rrpc_addr *gp;
-	sector_t l_addr = rrpc_get_laddr(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
 
@@ -623,14 +623,14 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 
 	for (i = 0; i < npages; i++) {
 		/* We assume that mapping occurs at 4KB granularity */
-		BUG_ON(!(l_addr + i >= 0 && l_addr + i < rrpc->nr_pages));
-		gp = &rrpc->trans_map[l_addr + i];
+		BUG_ON(!(laddr + i >= 0 && laddr + i < rrpc->nr_pages));
+		gp = &rrpc->trans_map[laddr + i];
 
 		if (gp->rblk) {
 			rqd->ppa_list[i] = gp->addr;
 		} else {
 			BUG_ON(is_gc);
-			rrpc_unlock_laddr_range(rrpc, l_addr, i, r);
+			rrpc_unlock_laddr(rrpc, r);
 			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
 							rqd->dma_ppa_list);
 			return NVM_IO_DONE;
@@ -645,20 +645,20 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 {
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	int is_gc = flags & NVM_IOTYPE_GC;
-	sector_t l_addr = rrpc_get_laddr(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
 	struct rrpc_addr *gp;
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
 		return NVM_IO_REQUEUE;
 
-	BUG_ON(!(l_addr >= 0 && l_addr < rrpc->nr_pages));
-	gp = &rrpc->trans_map[l_addr];
+	BUG_ON(!(laddr >= 0 && laddr < rrpc->nr_pages));
+	gp = &rrpc->trans_map[laddr];
 
 	if (gp->rblk) {
 		rqd->ppa = rrpc_get_sector(gp->addr);
 	} else {
 		BUG_ON(is_gc);
-		rrpc_unlock_rq(rrpc, bio, rqd);
+		rrpc_unlock_rq(rrpc, rqd);
 		return NVM_IO_DONE;
 	}
 
@@ -672,7 +672,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 {
 	struct rrpc_inflight_rq *r = rrpc_get_inflight_rq(rqd);
 	struct rrpc_addr *p;
-	sector_t l_addr = rrpc_get_laddr(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
 	int is_gc = flags & NVM_IOTYPE_GC;
 	int i;
 
@@ -683,10 +683,10 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 
 	for (i = 0; i < npages; i++) {
 		/* We assume that mapping occurs at 4KB granularity */
-		p = rrpc_map_page(rrpc, l_addr + i, is_gc);
+		p = rrpc_map_page(rrpc, laddr + i, is_gc);
 		if (!p) {
 			BUG_ON(is_gc);
-			rrpc_unlock_laddr_range(rrpc, l_addr, i, r);
+			rrpc_unlock_laddr(rrpc, r);
 			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
 							rqd->dma_ppa_list);
 			rrpc_gc_kick(rrpc);
@@ -705,15 +705,15 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 	struct rrpc_rq *rrqd = nvm_rq_to_pdu(rqd);
 	struct rrpc_addr *p;
 	int is_gc = flags & NVM_IOTYPE_GC;
-	sector_t l_addr = rrpc_get_laddr(bio);
+	sector_t laddr = rrpc_get_laddr(bio);
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd))
 		return NVM_IO_REQUEUE;
 
-	p = rrpc_map_page(rrpc, l_addr, is_gc);
+	p = rrpc_map_page(rrpc, laddr, is_gc);
 	if (!p) {
 		BUG_ON(is_gc);
-		rrpc_unlock_rq(rrpc, bio, rqd);
+		rrpc_unlock_rq(rrpc, rqd);
 		rrpc_gc_kick(rrpc);
 		return NVM_IO_REQUEUE;
 	}
@@ -959,8 +959,6 @@ static int rrpc_map_init(struct rrpc *rrpc)
 
 static int rrpc_core_init(struct rrpc *rrpc)
 {
-	int i;
-
 	down_write(&rrpc_lock);
 	if (!rrpc_gcb_cache) {
 		rrpc_gcb_cache = kmem_cache_create("rrpc_gcb",
@@ -994,12 +992,8 @@ static int rrpc_core_init(struct rrpc *rrpc)
 	if (!rrpc->rq_pool)
 		return -ENOMEM;
 
-	for (i = 0; i < RRPC_INFLIGHT_PARTS; i++) {
-		struct rrpc_inflight *map = &rrpc->inflight_map[i];
-
-		spin_lock_init(&map->lock);
-		INIT_LIST_HEAD(&map->reqs);
-	}
+	spin_lock_init(&rrpc->inflights.lock);
+	INIT_LIST_HEAD(&rrpc->inflights.reqs);
 
 	return 0;
 }
