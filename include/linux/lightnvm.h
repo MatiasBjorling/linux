@@ -154,11 +154,10 @@ struct nvm_lun {
 struct nvm_block {
 	struct list_head list;
 	struct nvm_lun *lun;
-
 	unsigned long long id;
-	int type;
 
 	void *priv;
+	int type;
 };
 
 struct nvm_dev {
