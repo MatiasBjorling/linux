@@ -28,14 +28,11 @@ To use LightNVM, a device is required to register as an open-channel
 SSD.
 
 There exist two implementations at the moment: null_nvm and NVMe driver.
-The null_blk driver is intended for performance testing. The NVMe driver
+The null_nvm driver is intended for performance testing. The NVMe driver
 can be initialized using the patches of Keith Busch's QEMU NVMe
 simulator, as well as using a supported Open-channel SSD device.
 
-The QEMU branch is available at:
-https://github.com/OpenChannelSSD/qemu-nvme
-
-Follow the guide at: https://github.com/OpenChannelSSD/linux/wiki
+Follow the guide at: http://openchannelssd.readthedocs.org/en/latest/
 
 # LightNVM Specification
 
