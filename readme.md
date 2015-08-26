@@ -23,7 +23,6 @@ Examples of such targets include key-value store, object-store, as well
 as traditional block devices, which can be application-specific.
 
 # How to use
--------------
 To use LightNVM, a device is required to register as an open-channel
 SSD.
 
