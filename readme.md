@@ -22,22 +22,15 @@ interface that exposes physical flash to user-space applications.
 Examples of such targets include key-value store, object-store, as well
 as traditional block devices, which can be application-specific.
 
-Currently, LightNVM is hooked up through the null_blk and NVMe driver.
-The NVMe extension allow development using the LightNVM-extended QEMU
-implementation, using Keith Busch's qemu-nvme branch.
-
-Development is taking place at:
-https://github.com/OpenChannelSSD/
-
 # How to use
 -------------
 To use LightNVM, a device is required to register as an open-channel
 SSD.
 
-There exist two implementations at the moment: null_blk and NVMe driver.
+There exist two implementations at the moment: null_nvm and NVMe driver.
 The null_blk driver is intended for performance testing. The NVMe driver
 can be initialized using the patches of Keith Busch's QEMU NVMe
-simulator, as well as using an Open-channel SSD device.
+simulator, as well as using a supported Open-channel SSD device.
 
 The QEMU branch is available at:
 https://github.com/OpenChannelSSD/qemu-nvme
@@ -48,7 +41,7 @@ Follow the guide at: https://github.com/OpenChannelSSD/linux/wiki
 
 We are actively creating a specification as more and more of the
 host/device interface is stabilized. Please see this Google document.
-It's open for comments.
+It is open for comments.
 
 http://goo.gl/BYTjLI
 
@@ -65,11 +58,11 @@ high-performance SSD that exposes direct flash to the host. The device
 driver is in progress.
 
 A number of stealth hardware startups are supporting LightNVM directly
-in their designs. Please contact us for more information.
+in their designs. Please contact get in for more information.
 
 - Other platform such as OpenSSD Jasmine and OpenSSD Cosmos are able to
 support LightNVM. However, there is no compatible firmwares yet.
 
-# Contact:
+# Contact
 Please write to Matias at mb@lightnvm.io for more information.
 
