@@ -184,12 +184,12 @@ static int init_chnls(struct request_queue *q, struct nvm_id *nvm_id,
 	struct nvme_nvm_id_chnl *src = nvme_nvm_id->chnls;
 	struct nvm_id_chnl *dst = nvm_id->chnls;
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_nvm_command c = {
-		.nvm_identify.opcode = nvme_nvm_admin_identify,
-		.nvm_identify.nsid = cpu_to_le32(ns->ns_id),
-	};
+	struct nvme_nvm_command c = {};
 	unsigned int len = nvm_id->nchannels;
 	int i, end, ret, off = 0;
+
+	c.nvm_identify.opcode = nvme_nvm_admin_identify;
+	c.nvm_identify.nsid = cpu_to_le32(ns->ns_id);
 
 	while (len) {
 		end = min_t(u32, NVME_NVM_CHNLS_PR_REQ, len);
@@ -230,13 +230,12 @@ static int nvme_nvm_identify(struct request_queue *q, struct nvm_id *nvm_id)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_nvm_id *nvme_nvm_id;
-	struct nvme_nvm_command c = {
-		.nvm_identify.opcode = nvme_nvm_admin_identify,
-		.nvm_identify.nsid = cpu_to_le32(ns->ns_id),
-		.nvm_identify.chnl_off = 0,
-	};
+	struct nvme_nvm_command c = {};
 	int ret;
 
+	c.nvm_identify.opcode = nvme_nvm_admin_identify;
+	c.nvm_identify.nsid = cpu_to_le32(ns->ns_id);
+	c.nvm_identify.chnl_off = 0;
 	nvme_nvm_id = kmalloc(4096, GFP_KERNEL);
 	if (!nvme_nvm_id)
 		return -ENOMEM;
@@ -270,14 +269,13 @@ static int nvme_nvm_get_features(struct request_queue *q,
 						struct nvm_get_features *gf)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_nvm_command c = {
-		.common.opcode = nvme_nvm_admin_get_features,
-		.common.nsid = ns->ns_id,
-	};
+	struct nvme_nvm_command c = {};
 	int sz = sizeof(struct nvm_get_features);
 	int ret;
 	u64 *resp;
 
+	c.common.opcode = nvme_nvm_admin_get_features;
+	c.common.nsid = ns->ns_id;
 	resp = kmalloc(sz, GFP_KERNEL);
 	if (!resp)
 		return -ENOMEM;
@@ -297,12 +295,11 @@ done:
 static int nvme_nvm_set_resp(struct request_queue *q, u64 resp)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_nvm_command c = {
-		.nvm_resp.opcode = nvme_nvm_admin_set_resp,
-		.nvm_resp.nsid = cpu_to_le32(ns->ns_id),
-		.nvm_resp.resp = cpu_to_le64(resp),
-	};
+	struct nvme_nvm_command c = {};
 
+	c.nvm_resp.opcode = nvme_nvm_admin_set_resp;
+	c.nvm_resp.nsid = cpu_to_le32(ns->ns_id);
+	c.nvm_resp.resp = cpu_to_le64(resp);
 	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
@@ -311,16 +308,15 @@ static int nvme_nvm_get_l2p_tbl(struct request_queue *q, u64 slba, u64 nlb,
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
-	struct nvme_nvm_command c = {
-		.nvm_l2p.opcode = nvme_nvm_admin_get_l2p_tbl,
-		.nvm_l2p.nsid = cpu_to_le32(ns->ns_id),
-	};
+	struct nvme_nvm_command c = {};
 	u32 len = queue_max_hw_sectors(q) << 9;
 	u64 nlb_pr_rq = len / sizeof(u64);
 	u64 cmd_slba = slba;
 	void *entries;
 	int ret = 0;
 
+	c.nvm_l2p.opcode = nvme_nvm_admin_get_l2p_tbl;
+	c.nvm_l2p.nsid = cpu_to_le32(ns->ns_id);
 	entries = kmalloc(len, GFP_KERNEL);
 	if (!entries)
 		return -ENOMEM;
@@ -365,15 +361,14 @@ static int nvme_nvm_get_bb_tbl(struct request_queue *q, int lunid,
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
-	struct nvme_nvm_command c = {
-		.nvm_get_bb.opcode = nvme_nvm_admin_get_bb_tbl,
-		.nvm_get_bb.nsid = cpu_to_le32(ns->ns_id),
-		.nvm_get_bb.lbb = cpu_to_le32(lunid),
-	};
+	struct nvme_nvm_command c = {};
 	void *bb_bitmap;
 	u16 bb_bitmap_size;
 	int ret = 0;
 
+	c.nvm_get_bb.opcode = nvme_nvm_admin_get_bb_tbl;
+	c.nvm_get_bb.nsid = cpu_to_le32(ns->ns_id);
+	c.nvm_get_bb.lbb = cpu_to_le32(lunid);
 	bb_bitmap_size = ((nr_blocks >> 15) + 1) * PAGE_SIZE;
 	bb_bitmap = kmalloc(bb_bitmap_size, GFP_KERNEL);
 	if (!bb_bitmap)
@@ -471,12 +466,11 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
 {
 	struct nvme_ns *ns = q->queuedata;
-	struct nvme_nvm_command c = {
-		.nvm_erase.opcode = nvme_nvm_cmd_erase,
-		.nvm_erase.nsid = cpu_to_le32(ns->ns_id),
-		.nvm_erase.blk_addr = cpu_to_le64(block_id),
-	};
+	struct nvme_nvm_command c = {};
 
+	c.nvm_erase.opcode = nvme_nvm_cmd_erase;
+	c.nvm_erase.nsid = cpu_to_le32(ns->ns_id);
+	c.nvm_erase.blk_addr = cpu_to_le64(block_id);
 	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
