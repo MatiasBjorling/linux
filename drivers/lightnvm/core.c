@@ -293,10 +293,30 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 						int lun_begin, int lun_end)
 {
 	struct request_queue *tqueue;
+	struct nvm_bm_type *bt;
 	struct gendisk *tdisk;
 	struct nvm_tgt_type *tt;
 	struct nvm_target *t;
 	void *targetdata;
+	int ret = 0;
+
+	if (!dev->bm) {
+		/* register with device with a supported BM */
+		list_for_each_entry(bt, &nvm_bms, list) {
+			ret = bt->register_bm(dev);
+			if (ret < 0)
+				return ret; /* initialization failed */
+			if (ret > 0) {
+				dev->bm = bt;
+				break; /* successfully initialized */
+			}
+		}
+
+		if (!ret) {
+			pr_info("nvm: no compatible bm was found.\n");
+			return -ENODEV;
+		}
+	}
 
 	tt = nvm_find_target_type(ttname);
 	if (!tt) {
