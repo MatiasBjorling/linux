@@ -215,7 +215,7 @@ static int hb_register(struct nvm_dev *dev)
 	struct bm_hb *bm;
 	int ret;
 
-	if (!dev->features.rsp & NVM_RSP_L2P)
+	if (!(dev->features.rsp & NVM_RSP_L2P))
 		return 0;
 
 	bm = kzalloc(sizeof(struct bm_hb), GFP_KERNEL);
