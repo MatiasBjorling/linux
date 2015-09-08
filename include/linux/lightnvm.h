@@ -304,10 +304,7 @@ struct nvm_dev_ops;
 struct nvm_dev;
 struct nvm_lun;
 struct nvm_block;
-struct nvm_rq {
-};
 struct nvm_tgt_type;
-struct nvm_tgt_instance;
 
 static inline struct nvm_tgt_type *nvm_find_target_type(const char *c)
 {
