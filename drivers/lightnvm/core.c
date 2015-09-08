@@ -286,6 +286,70 @@ void nvm_exit(struct nvm_dev *dev)
 	pr_info("nvm: successfully unloaded\n");
 }
 
+int nvm_register(struct request_queue *q, char *disk_name,
+							struct nvm_dev_ops *ops)
+{
+	struct nvm_dev *dev;
+	int ret;
+
+	if (!ops->identify || !ops->get_features)
+		return -EINVAL;
+
+	dev = kzalloc(sizeof(struct nvm_dev), GFP_KERNEL);
+	if (!dev)
+		return -ENOMEM;
+
+	dev->q = q;
+	dev->ops = ops;
+	dev->ops->dev_sector_size = DEV_EXPOSED_PAGE_SIZE;
+	strncpy(dev->name, disk_name, DISK_NAME_LEN);
+
+	ret = nvm_init(dev);
+	if (ret)
+		goto err_init;
+
+	down_write(&nvm_lock);
+	list_add(&dev->devices, &nvm_devices);
+	up_write(&nvm_lock);
+
+	if (dev->ops->max_phys_sect > 256) {
+		pr_info("nvm: maximum number of sectors supported in target is 255. max_phys_sect set to 255\n");
+		dev->ops->max_phys_sect = 255;
+	}
+
+	if (dev->ops->max_phys_sect > 1) {
+		dev->ppalist_pool = dev->ops->create_ppa_pool(dev->q);
+		if (!dev->ppalist_pool) {
+			pr_err("nvm: could not create ppa pool\n");
+			return -ENOMEM;
+		}
+	}
+
+	return 0;
+err_init:
+	kfree(dev);
+	return ret;
+}
+EXPORT_SYMBOL(nvm_register);
+
+void nvm_unregister(char *disk_name)
+{
+	struct nvm_dev *dev = nvm_find_nvm_dev(disk_name);
+
+	if (!dev) {
+		pr_err("nvm: could not find device %s on unregister\n",
+								disk_name);
+		return;
+	}
+
+	nvm_exit(dev);
+
+	down_write(&nvm_lock);
+	list_del(&dev->devices);
+	up_write(&nvm_lock);
+}
+EXPORT_SYMBOL(nvm_unregister);
+
 static const struct block_device_operations nvm_fops = {
 	.owner		= THIS_MODULE,
 };
@@ -568,70 +632,6 @@ static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
 
 module_param_cb(configure_debug, &nvm_configure_by_str_event_param_ops, NULL,
 									0644);
-
-int nvm_register(struct request_queue *q, char *disk_name,
-							struct nvm_dev_ops *ops)
-{
-	struct nvm_dev *dev;
-	int ret;
-
-	if (!ops->identify || !ops->get_features)
-		return -EINVAL;
-
-	dev = kzalloc(sizeof(struct nvm_dev), GFP_KERNEL);
-	if (!dev)
-		return -ENOMEM;
-
-	dev->q = q;
-	dev->ops = ops;
-	dev->ops->dev_sector_size = DEV_EXPOSED_PAGE_SIZE;
-	strncpy(dev->name, disk_name, DISK_NAME_LEN);
-
-	ret = nvm_init(dev);
-	if (ret)
-		goto err_init;
-
-	down_write(&nvm_lock);
-	list_add(&dev->devices, &nvm_devices);
-	up_write(&nvm_lock);
-
-	if (dev->ops->max_phys_sect > 256) {
-		pr_info("nvm: maximum number of sectors supported in target is 255. max_phys_sect set to 255\n");
-		dev->ops->max_phys_sect = 255;
-	}
-
-	if (dev->ops->max_phys_sect > 1) {
-		dev->ppalist_pool = dev->ops->create_ppa_pool(dev->q);
-		if (!dev->ppalist_pool) {
-			pr_err("nvm: could not create ppa pool\n");
-			return -ENOMEM;
-		}
-	}
-
-	return 0;
-err_init:
-	kfree(dev);
-	return ret;
-}
-EXPORT_SYMBOL(nvm_register);
-
-void nvm_unregister(char *disk_name)
-{
-	struct nvm_dev *dev = nvm_find_nvm_dev(disk_name);
-
-	if (!dev) {
-		pr_err("nvm: could not find device %s on unregister\n",
-								disk_name);
-		return;
-	}
-
-	nvm_exit(dev);
-
-	down_write(&nvm_lock);
-	list_del(&dev->devices);
-	up_write(&nvm_lock);
-}
-EXPORT_SYMBOL(nvm_unregister);
 
 static long nvm_ioctl_info(struct file *file, void __user *arg)
 {
