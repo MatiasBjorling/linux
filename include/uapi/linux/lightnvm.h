@@ -34,7 +34,8 @@ struct nvm_ioctl_info_tgt {
 struct nvm_ioctl_info {
 	__u32 version[3];	/* in/out - major, minor, patch */
 	__u16 tgtsize;		/* number of targets */
-	__u16 reserved[7];	/* pad to 4K page */
+	__u16 reserved16;	/* pad to 4K page */
+	__u32 reserved[12];
 	struct nvm_ioctl_info_tgt tgts[NVM_TTYPE_MAX];
 };
 
@@ -92,9 +93,9 @@ enum {
 						struct nvm_ioctl_info)
 #define NVM_GET_DEVICES		_IOWR(NVM_IOCTL, NVM_GET_DEVICES_CMD, \
 						struct nvm_ioctl_get_devices)
-#define NVM_DEV_CREATE		_IOWR(NVM_IOCTL, NVM_DEV_CREATE_CMD, \
+#define NVM_DEV_CREATE		_IOW(NVM_IOCTL, NVM_DEV_CREATE_CMD, \
 						struct nvm_ioctl_create)
-#define NVM_DEV_REMOVE		_IOWR(NVM_IOCTL, NVM_DEV_REMOVE_CMD, \
+#define NVM_DEV_REMOVE		_IOW(NVM_IOCTL, NVM_DEV_REMOVE_CMD, \
 						struct nvm_ioctl_remove)
 
 #define NVM_VERSION_MAJOR	1

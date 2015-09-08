@@ -293,6 +293,10 @@ extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 #define NVM_MSG_PREFIX "nvm"
 #define ADDR_EMPTY (~0ULL)
 
+#define NVM_VERSION_MAJOR 1
+#define NVM_VERSION_MINOR 0
+#define NVM_VERSION_PATCH 0
+
 static inline unsigned long nvm_get_rq_flags(struct request *rq)
 {
 	return (unsigned long)rq->cmd;
