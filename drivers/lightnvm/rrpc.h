@@ -1,6 +1,6 @@
 /*
  * Copyright (C) 2015 IT University of Copenhagen
- * Initial release: Matias Bjorling <mabj@itu.dk>
+ * Initial release: Matias Bjorling <m@bjorling.me>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License version
