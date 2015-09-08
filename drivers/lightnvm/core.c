@@ -1,6 +1,6 @@
 /*
- * Copyright (C) 2015 IT University of Copenhagen
- * Initial release: Matias Bjorling <mabj@itu.dk>
+ * Copyright (C) 2015 IT University of Copenhagen. All rights reserved.
+ * Initial release: Matias Bjorling <m@bjorling.me>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License version
@@ -25,8 +25,9 @@
 #include <linux/sem.h>
 #include <linux/bitmap.h>
 #include <linux/module.h>
-
+#include <linux/miscdevice.h>
 #include <linux/lightnvm.h>
+#include <uapi/linux/lightnvm.h>
 
 static LIST_HEAD(nvm_targets);
 static LIST_HEAD(nvm_bms);
@@ -289,9 +290,10 @@ static const struct block_device_operations nvm_fops = {
 	.owner		= THIS_MODULE,
 };
 
-static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
-						int lun_begin, int lun_end)
+static int nvm_create_target(struct nvm_dev *dev,
+						struct nvm_ioctl_create *create)
 {
+	struct nvm_ioctl_create_simple *s = &create->conf.s;
 	struct request_queue *tqueue;
 	struct nvm_bm_type *bt;
 	struct gendisk *tdisk;
@@ -318,15 +320,15 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 		}
 	}
 
-	tt = nvm_find_target_type(ttname);
+	tt = nvm_find_target_type(create->tgttype);
 	if (!tt) {
-		pr_err("nvm: target type %s not found\n", ttname);
+		pr_err("nvm: target type %s not found\n", create->tgttype);
 		return -EINVAL;
 	}
 
 	down_write(&nvm_lock);
 	list_for_each_entry(t, &dev->online_targets, list) {
-		if (!strcmp(tname, t->disk->disk_name)) {
+		if (!strcmp(create->tgtname, t->disk->disk_name)) {
 			pr_err("nvm: target name already exists.\n");
 			up_write(&nvm_lock);
 			return -EINVAL;
@@ -347,14 +349,14 @@ static int nvm_create_target(struct nvm_dev *dev, char *ttname, char *tname,
 	if (!tdisk)
 		goto err_queue;
 
-	sprintf(tdisk->disk_name, "%s", tname);
+	sprintf(tdisk->disk_name, "%s", create->tgtname);
 	tdisk->flags = GENHD_FL_EXT_DEVT;
 	tdisk->major = 0;
 	tdisk->first_minor = 0;
 	tdisk->fops = &nvm_fops;
 	tdisk->queue = tqueue;
 
-	targetdata = tt->init(dev, tdisk, lun_begin, lun_end);
+	targetdata = tt->init(dev, tdisk, s->lun_begin, s->lun_end);
 	if (IS_ERR(targetdata))
 		goto err_init;
 
@@ -461,33 +463,54 @@ static int nvm_configure_del(const char *val)
 	return 0;
 }
 
-static int nvm_configure_add(const char *val)
+static int __nvm_configure_add(struct nvm_ioctl_create *create)
 {
 	struct nvm_dev *dev;
-	char opcode, devname[DISK_NAME_LEN], tgtengine[255], tname[255];
-	int lun_begin, lun_end, ret;
+	struct nvm_ioctl_create_simple *s;
 
-	ret = sscanf(val, "%c %s %s %s %u:%u", &opcode, devname, tgtengine,
-						tname, &lun_begin, &lun_end);
-	if (ret != 6) {
-		pr_err("nvm: invalid command. Use \"opcode device name tgtengine lun_begin:lun_end\".\n");
-		return -EINVAL;
-	}
-
-	dev = nvm_find_nvm_dev(devname);
+	dev = nvm_find_nvm_dev(create->dev);
 	if (!dev) {
 		pr_err("nvm: device not found\n");
 		return -EINVAL;
 	}
 
-	if (lun_begin > lun_end || lun_end > dev->nr_luns) {
+	if (create->conf.type != NVM_CONFIG_TYPE_SIMPLE) {
+		pr_err("nvm: config type not valid\n");
+		return -EINVAL;
+	}
+	s = &create->conf.s;
+
+	if (s->lun_begin > s->lun_end || s->lun_end > dev->nr_luns) {
 		pr_err("nvm: lun out of bound (%u:%u > %u)\n",
-					lun_begin, lun_end, dev->nr_luns);
+			s->lun_begin, s->lun_end, dev->nr_luns);
 		return -EINVAL;
 	}
 
-	return nvm_create_target(dev, tname, tgtengine, lun_begin, lun_end);
+	return nvm_create_target(dev, create);
 }
+
+static int nvm_configure_add(const char *val)
+{
+	struct nvm_ioctl_create create;
+	char opcode;
+	int lun_begin, lun_end, ret;
+
+	ret = sscanf(val, "%c %s %s %s %u:%u", &opcode, create.dev,
+						create.tgtname, create.tgttype,
+						&lun_begin, &lun_end);
+	if (ret != 6) {
+		pr_err("nvm: invalid command. Use \"opcode device name tgttype lun_begin:lun_end\".\n");
+		return -EINVAL;
+	}
+
+	create.flags = 0;
+	create.conf.type = NVM_CONFIG_TYPE_SIMPLE;
+	create.conf.s.lun_begin = lun_begin;
+	create.conf.s.lun_end = lun_end;
+
+	return __nvm_configure_add(&create);
+}
+
 
 /* Exposes administrative interface through /sys/module/lnvm/configure_by_str */
 static int nvm_configure_by_str_event(const char *val,
@@ -609,3 +632,99 @@ void nvm_unregister(char *disk_name)
 	up_write(&nvm_lock);
 }
 EXPORT_SYMBOL(nvm_unregister);
+
+static long nvm_ioctl_info(struct file *file, void __user *arg)
+{
+	return 0;
+}
+
+static long nvm_ioctl_get_devices(struct file *file, void __user *arg)
+{
+	return 0;
+}
+
+static long nvm_ioctl_dev_create(struct file *file, void __user *arg)
+{
+	struct nvm_ioctl_create dc;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	if (copy_from_user(&dc, arg, sizeof(struct nvm_ioctl_create)))
+		return -EFAULT;
+
+	dc.dev[NVM_NAME_MAX - 1] = '\0';
+	dc.tgttype[NVM_TTYPE_NAME_MAX - 1] = '\0';
+	dc.tgtname[NVM_NAME_MAX - 1] = '\0';
+
+	if (dc.flags != 0) {
+		pr_err("nvm: no flags supported\n");
+		return -EINVAL;
+	}
+
+	return __nvm_configure_add(&dc);
+}
+
+static long nvm_ioctl_dev_remove(struct file *file, void __user *arg)
+{
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	return 0;
+}
+
+static long nvm_ctl_ioctl(struct file *file, uint cmd, unsigned long arg)
+{
+	void __user *argp = (void __user *)arg;
+
+	switch (cmd) {
+	case NVM_INFO:
+		return nvm_ioctl_info(file, argp);
+	case NVM_GET_DEVICES:
+		return nvm_ioctl_get_devices(file, argp);
+	case NVM_DEV_CREATE:
+		return nvm_ioctl_dev_create(file, argp);
+	case NVM_DEV_REMOVE:
+		return nvm_ioctl_dev_remove(file, argp);
+	}
+	return 0;
+}
+
+static const struct file_operations _ctl_fops = {
+	.open = nonseekable_open,
+	.unlocked_ioctl = nvm_ctl_ioctl,
+	.owner = THIS_MODULE,
+	.llseek  = noop_llseek,
+};
+
+static struct miscdevice _nvm_misc = {
+	.minor		= MISC_DYNAMIC_MINOR,
+	.name  		= "lightnvm",
+	.nodename	= "lightnvm/control",
+	.fops  		= &_ctl_fops,
+};
+
+MODULE_ALIAS_MISCDEV(MISC_DYNAMIC_MINOR);
+
+static int __init nvm_mod_init(void)
+{
+	int ret;
+
+	ret = misc_register(&_nvm_misc);
+	if (ret)
+		pr_err("nvm: misc_register failed for control device");
+
+	return ret;
+}
+
+static void __exit nvm_mod_exit(void)
+{
+	if (misc_deregister(&_nvm_misc) < 0)
+		pr_err("nvm: misc_deregister failed for control device");
+}
+
+MODULE_AUTHOR("Matias Bjorling <m@bjorling.me>");
+MODULE_LICENSE("GPL2");
+MODULE_VERSION("0.1");
+module_init(nvm_mod_init);
+module_exit(nvm_mod_exit);
