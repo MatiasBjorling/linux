@@ -340,6 +340,7 @@ static void hb_free_blocks_print(struct nvm_dev *dev)
 
 static struct nvm_bm_type bm_hb = {
 	.name		= "hb",
+	.version	= {0, 1, 0},
 
 	.register_bm	= hb_register,
 	.unregister_bm	= hb_unregister,
