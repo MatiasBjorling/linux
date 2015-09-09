@@ -39,8 +39,23 @@ struct nvm_ioctl_info {
 	struct nvm_ioctl_info_tgt tgts[NVM_TTYPE_MAX];
 };
 
-struct nvm_ioctl_get_devices {
+enum {
+	NVM_DEVICE_ACTIVE = 1 << 0,
+};
 
+struct nvm_ioctl_device_info {
+	char devname[NVM_TTYPE_NAME_MAX];
+	char bmname[NVM_TTYPE_NAME_MAX];
+	__u32 version[3];
+	__u32 flags;
+	__u32 reserved[4];
+};
+
+struct nvm_ioctl_get_devices {
+	__u32 nr_devives;
+	__u32 dev_offset;
+	__u32 reserved[30];
+	struct nvm_ioctl_device_info dev[31];
 };
 
 struct nvm_ioctl_create_simple {
