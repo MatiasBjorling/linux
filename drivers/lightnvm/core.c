@@ -472,10 +472,10 @@ static void nvm_remove_target(struct nvm_target *t)
 static int nvm_configure_show(const char *val)
 {
 	struct nvm_dev *dev;
-	char opcode, devname[NVM_NAME_MAX];
+	char opcode, devname[DISK_NAME_LEN];
 	int ret;
 
-	ret = sscanf(val, "%c %256s", &opcode, devname);
+	ret = sscanf(val, "%c %32s", &opcode, devname);
 	if (ret != 2) {
 		pr_err("nvm: invalid command. Use \"opcode devicename\".\n");
 		return -EINVAL;
@@ -623,9 +623,9 @@ static int nvm_configure_get(char *buf, const struct kernel_param *kp)
 	buf += sprintf(buf, "available devices:\n");
 	down_write(&nvm_lock);
 	list_for_each_entry(dev, &nvm_devices, devices) {
-		if (sz > 4095 - NVM_NAME_MAX)
+		if (sz > 4095 - DISK_NAME_LEN)
 			break;
-		buf += sprintf(buf, " %256s\n", dev->name);
+		buf += sprintf(buf, " %32s\n", dev->name);
 	}
 	up_write(&nvm_lock);
 
@@ -687,6 +687,45 @@ static long nvm_ioctl_info(struct file *file, void __user *arg)
 
 static long nvm_ioctl_get_devices(struct file *file, void __user *arg)
 {
+	struct nvm_ioctl_get_devices *devices;
+	struct nvm_dev *dev;
+	int i = 0;
+
+	if (!capable(CAP_SYS_ADMIN))
+		return -EPERM;
+
+	devices = kzalloc(sizeof(struct nvm_ioctl_get_devices), GFP_KERNEL);
+	if (!devices)
+		return -ENOMEM;
+
+	down_write(&nvm_lock);
+	list_for_each_entry(dev, &nvm_devices, devices) {
+		struct nvm_ioctl_device_info *info = &devices->info[i];
+
+		sprintf(info->devname, "%s", dev->name);
+		if (dev->bm) {
+			info->bmversion[0] = dev->bm->version[0];
+			info->bmversion[1] = dev->bm->version[1];
+			info->bmversion[2] = dev->bm->version[2];
+			sprintf(info->bmname, "%s", dev->bm->name);
+		} else {
+			sprintf(info->bmname, "none");
+		}
+
+		i++;
+		if (i > 31) {
+			pr_err("nvm: max 31 devices can be reported.\n");
+			break;
+		}
+	}
+	up_write(&nvm_lock);
+
+	devices->nr_devices = i;
+
+	if (copy_to_user(arg, devices, sizeof(struct nvm_ioctl_get_devices)))
+		return -EFAULT;
+
+	kfree(devices);
 	return 0;
 }
 
@@ -700,9 +739,9 @@ static long nvm_ioctl_dev_create(struct file *file, void __user *arg)
 	if (copy_from_user(&create, arg, sizeof(struct nvm_ioctl_create)))
 		return -EFAULT;
 
-	create.dev[NVM_NAME_MAX - 1] = '\0';
+	create.dev[DISK_NAME_LEN - 1] = '\0';
 	create.tgttype[NVM_TTYPE_NAME_MAX - 1] = '\0';
-	create.tgtname[NVM_NAME_MAX - 1] = '\0';
+	create.tgtname[DISK_NAME_LEN - 1] = '\0';
 
 	if (create.flags != 0) {
 		pr_err("nvm: no flags supported\n");
@@ -722,7 +761,7 @@ static long nvm_ioctl_dev_remove(struct file *file, void __user *arg)
 	if (copy_from_user(&remove, arg, sizeof(struct nvm_ioctl_remove)))
 		return -EFAULT;
 
-	remove.tgtname[NVM_NAME_MAX -1] = '\0';
+	remove.tgtname[DISK_NAME_LEN -1] = '\0';
 
 	if (remove.flags != 0) {
 		pr_err("nvm: no flags supported\n");

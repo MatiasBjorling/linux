@@ -18,10 +18,18 @@
 
 #ifndef _UAPI_LINUX_LIGHTNVM_H
 #define _UAPI_LINUX_LIGHTNVM_H
+
+#ifdef __KERNEL__
+#include <linux/kernel.h>
+#include <linux/ioctl.h>
+#else /* __KERNEL__ */
+#include <stdio.h>
+#include <sys/ioctl.h>
+#endif /* __KERNEL__ */
+
 #include <linux/types.h>
 #include <linux/ioctl.h>
 
-#define NVM_NAME_MAX 256
 #define NVM_TTYPE_NAME_MAX 48
 #define NVM_TTYPE_MAX 63
 
@@ -44,18 +52,17 @@ enum {
 };
 
 struct nvm_ioctl_device_info {
-	char devname[NVM_TTYPE_NAME_MAX];
+	char devname[DISK_NAME_LEN];
 	char bmname[NVM_TTYPE_NAME_MAX];
-	__u32 version[3];
+	__u32 bmversion[3];
 	__u32 flags;
-	__u32 reserved[4];
+	__u32 reserved[8];
 };
 
 struct nvm_ioctl_get_devices {
-	__u32 nr_devives;
-	__u32 dev_offset;
-	__u32 reserved[30];
-	struct nvm_ioctl_device_info dev[31];
+	__u32 nr_devices;
+	__u32 reserved[31];
+	struct nvm_ioctl_device_info info[31];
 };
 
 struct nvm_ioctl_create_simple {
@@ -75,9 +82,9 @@ struct nvm_ioctl_create_conf {
 };
 
 struct nvm_ioctl_create {
-	char dev[NVM_NAME_MAX];			/* open-channel SSD device */
+	char dev[DISK_NAME_LEN];			/* open-channel SSD device */
 	char tgttype[NVM_TTYPE_NAME_MAX];	/* target type name */
-	char tgtname[NVM_NAME_MAX];		/* dev to expose target as */
+	char tgtname[DISK_NAME_LEN];		/* dev to expose target as */
 
 	__u32 flags;
 
@@ -85,7 +92,7 @@ struct nvm_ioctl_create {
 };
 
 struct nvm_ioctl_remove {
-	char tgtname[NVM_NAME_MAX];
+	char tgtname[DISK_NAME_LEN];
 
 	__u32 flags;
 };
@@ -106,7 +113,7 @@ enum {
 
 #define NVM_INFO		_IOWR(NVM_IOCTL, NVM_INFO_CMD, \
 						struct nvm_ioctl_info)
-#define NVM_GET_DEVICES		_IOWR(NVM_IOCTL, NVM_GET_DEVICES_CMD, \
+#define NVM_GET_DEVICES		_IOR(NVM_IOCTL, NVM_GET_DEVICES_CMD, \
 						struct nvm_ioctl_get_devices)
 #define NVM_DEV_CREATE		_IOW(NVM_IOCTL, NVM_DEV_CREATE_CMD, \
 						struct nvm_ioctl_create)
