@@ -25,6 +25,7 @@
 #else /* __KERNEL__ */
 #include <stdio.h>
 #include <sys/ioctl.h>
+#define DISK_NAME_LEN 32
 #endif /* __KERNEL__ */
 
 #include <linux/types.h>
@@ -32,6 +33,8 @@
 
 #define NVM_TTYPE_NAME_MAX 48
 #define NVM_TTYPE_MAX 63
+
+#define NVM_CTRL_FILE "/dev/lightnvm/control"
 
 struct nvm_ioctl_info_tgt {
 	__u32 version[3];
