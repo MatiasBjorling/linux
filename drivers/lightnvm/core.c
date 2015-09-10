@@ -499,7 +499,7 @@ static int __nvm_configure_remove(struct nvm_ioctl_remove *remove)
 {
 	struct nvm_target *t = NULL;
 	struct nvm_dev *dev;
-	int ret;
+	int ret = -1;
 
 	down_write(&nvm_lock);
 	list_for_each_entry(dev, &nvm_devices, devices)
