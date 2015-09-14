@@ -469,30 +469,30 @@ static void nvm_remove_target(struct nvm_target *t)
 	kfree(t);
 }
 
-static int nvm_configure_show(const char *val)
+static int __nvm_configure_create(struct nvm_ioctl_create *create)
 {
 	struct nvm_dev *dev;
-	char opcode, devname[DISK_NAME_LEN];
-	int ret;
+	struct nvm_ioctl_create_simple *s;
 
-	ret = sscanf(val, "%c %32s", &opcode, devname);
-	if (ret != 2) {
-		pr_err("nvm: invalid command. Use \"opcode devicename\".\n");
-		return -EINVAL;
-	}
-
-	dev = nvm_find_nvm_dev(devname);
+	dev = nvm_find_nvm_dev(create->dev);
 	if (!dev) {
 		pr_err("nvm: device not found\n");
 		return -EINVAL;
 	}
 
-	if (!dev->bm)
-		return 0;
+	if (create->conf.type != NVM_CONFIG_TYPE_SIMPLE) {
+		pr_err("nvm: config type not valid\n");
+		return -EINVAL;
+	}
+	s = &create->conf.s;
 
-	dev->bm->free_blocks_print(dev);
+	if (s->lun_begin > s->lun_end || s->lun_end > dev->nr_luns) {
+		pr_err("nvm: lun out of bound (%u:%u > %u)\n",
+			s->lun_begin, s->lun_end, dev->nr_luns);
+		return -EINVAL;
+	}
 
-	return 0;
+	return nvm_create_target(dev, create);
 }
 
 static int __nvm_configure_remove(struct nvm_ioctl_remove *remove)
@@ -520,6 +520,33 @@ static int __nvm_configure_remove(struct nvm_ioctl_remove *remove)
 	return 0;
 }
 
+#ifdef CONFIG_NVM_DEBUG
+static int nvm_configure_show(const char *val)
+{
+	struct nvm_dev *dev;
+	char opcode, devname[DISK_NAME_LEN];
+	int ret;
+
+	ret = sscanf(val, "%c %32s", &opcode, devname);
+	if (ret != 2) {
+		pr_err("nvm: invalid command. Use \"opcode devicename\".\n");
+		return -EINVAL;
+	}
+
+	dev = nvm_find_nvm_dev(devname);
+	if (!dev) {
+		pr_err("nvm: device not found\n");
+		return -EINVAL;
+	}
+
+	if (!dev->bm)
+		return 0;
+
+	dev->bm->free_blocks_print(dev);
+
+	return 0;
+}
+
 static int nvm_configure_remove(const char *val)
 {
 	struct nvm_ioctl_remove remove;
@@ -535,32 +562,6 @@ static int nvm_configure_remove(const char *val)
 	remove.flags = 0;
 
 	return __nvm_configure_remove(&remove);
-}
-
-static int __nvm_configure_create(struct nvm_ioctl_create *create)
-{
-	struct nvm_dev *dev;
-	struct nvm_ioctl_create_simple *s;
-
-	dev = nvm_find_nvm_dev(create->dev);
-	if (!dev) {
-		pr_err("nvm: device not found\n");
-		return -EINVAL;
-	}
-
-	if (create->conf.type != NVM_CONFIG_TYPE_SIMPLE) {
-		pr_err("nvm: config type not valid\n");
-		return -EINVAL;
-	}
-	s = &create->conf.s;
-
-	if (s->lun_begin > s->lun_end || s->lun_end > dev->nr_luns) {
-		pr_err("nvm: lun out of bound (%u:%u > %u)\n",
-			s->lun_begin, s->lun_end, dev->nr_luns);
-		return -EINVAL;
-	}
-
-	return nvm_create_target(dev, create);
 }
 
 static int nvm_configure_create(const char *val)
@@ -642,6 +643,8 @@ static const struct kernel_param_ops nvm_configure_by_str_event_param_ops = {
 
 module_param_cb(configure_debug, &nvm_configure_by_str_event_param_ops, NULL,
 									0644);
+
+#endif /* CONFIG_NVM_DEBUG */
 
 static long nvm_ioctl_info(struct file *file, void __user *arg)
 {
