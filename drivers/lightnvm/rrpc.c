@@ -603,7 +603,6 @@ static void rrpc_end_io(struct nvm_rq *rqd, int error)
 	if (npages > 1)
 		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
 
-
 	mempool_free(rqd, rrpc->rq_pool);
 }
 
@@ -637,6 +636,8 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 		}
 	}
 
+	rqd->opcode = NVM_OP_HBREAD;
+
 	return NVM_IO_OK;
 }
 
@@ -662,6 +663,7 @@ static int rrpc_read_rq(struct rrpc *rrpc, struct bio *bio, struct nvm_rq *rqd,
 		return NVM_IO_DONE;
 	}
 
+	rqd->opcode = NVM_OP_HBREAD;
 	rrqd->addr = gp;
 
 	return NVM_IO_OK;
@@ -696,6 +698,8 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 		rqd->ppa_list[i] = p->addr;
 	}
 
+	rqd->opcode = NVM_OP_HBWRITE;
+
 	return NVM_IO_OK;
 }
 
@@ -719,6 +723,7 @@ static int rrpc_write_rq(struct rrpc *rrpc, struct bio *bio,
 	}
 
 	rqd->ppa = rrpc_get_sector(p->addr);
+	rqd->opcode = NVM_OP_HBWRITE;
 	rrqd->addr = p;
 
 	return NVM_IO_OK;
