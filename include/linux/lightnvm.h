@@ -35,6 +35,13 @@ enum {
 	/* Status codes */
 	NVM_SUCCESS		= 0,
 	NVM_RSP_NOT_CHANGEABLE	= 1,
+
+	/* Device opcodes */
+	NVM_OP_HBREAD		= 0x20,
+	NVM_OP_HBWRITE		= 0x21,
+	NVM_OP_PREAD		= 0x22,
+	NVM_OP_PWRITE		= 0x23,
+	NVM_OP_ERASE		= 0x30,
 };
 
 struct nvm_id_chnl {
@@ -79,11 +86,16 @@ struct nvm_tgt_instance {
 
 struct nvm_rq {
 	struct nvm_tgt_instance *ins;
+
 	struct bio *bio;
+
 	union {
 		sector_t ppa;
 		sector_t *ppa_list;
 	};
+
+	unsigned short opcode;
+
 	/*DMA handler to be used by underlying devices supporting DMA*/
 	dma_addr_t dma_ppa_list;
 	uint8_t npages;
