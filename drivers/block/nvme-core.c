@@ -2120,18 +2120,19 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 	if (nvme_revalidate_disk(ns->disk))
 		goto out_free_disk;
 
-	if (ns->type != NVME_NS_NVM)
+	if (ns->type != NVME_NS_NVM) {
 		add_disk(ns->disk);
-	if (ns->ms) {
-		struct block_device *bd = bdget_disk(ns->disk, 0);
-		if (!bd)
-			return;
-		if (blkdev_get(bd, FMODE_READ, NULL)) {
-			bdput(bd);
-			return;
+		if (ns->ms) {
+			struct block_device *bd = bdget_disk(ns->disk, 0);
+			if (!bd)
+				return;
+			if (blkdev_get(bd, FMODE_READ, NULL)) {
+				bdput(bd);
+				return;
+			}
+			blkdev_reread_part(bd);
+			blkdev_put(bd, FMODE_READ);
 		}
-		blkdev_reread_part(bd);
-		blkdev_put(bd, FMODE_READ);
 	}
 	return;
  out_free_disk:
