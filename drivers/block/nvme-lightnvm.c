@@ -534,24 +534,15 @@ static void nvme_nvm_destroy_dma_pool(void *pool)
 	dma_pool_destroy(dma_pool);
 }
 
-static void *nvme_nvm_alloc_ppalist(struct request_queue *q, void *pool,
+static void *nvme_nvm_dev_dma_alloc(struct request_queue *q, void *pool,
 				    gfp_t mem_flags, dma_addr_t *dma_handler)
 {
-	struct nvme_ns *ns = q->queuedata;
-	struct nvme_dev *dev = ns->dev;
-	struct sector_t *ppa_list;
 	struct dma_pool *ppalist_pool = pool;
 
-	ppa_list = dma_pool_alloc(ppalist_pool, mem_flags, dma_handler);
-	if (!ppa_list) {
-		dev_err(dev->dev, "Unable to allocate DMA\n");
-		return NULL;
-	}
-
-	return ppa_list;
+	return dma_pool_alloc(ppalist_pool, mem_flags, dma_handler);
 }
 
-static void nvme_nvm_free_ppalist(void *pool, void *ppa_list,
+static void nvme_nvm_dev_dma_free(void *pool, void *ppa_list,
 							dma_addr_t dma_handler)
 {
 	struct dma_pool *ppalist_pool = pool;
@@ -575,8 +566,8 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 
 	.create_dma_pool	= nvme_nvm_create_dma_pool,
 	.destroy_dma_pool	= nvme_nvm_destroy_dma_pool,
-	.alloc_ppalist		= nvme_nvm_alloc_ppalist,
-	.free_ppalist		= nvme_nvm_free_ppalist,
+	.dev_dma_alloc		= nvme_nvm_dev_dma_alloc,
+	.dev_dma_free		= nvme_nvm_dev_dma_free,
 
 	.max_phys_sect		= 64,
 };
