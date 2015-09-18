@@ -286,23 +286,15 @@ static void null_destroy_dma_pool(void *pool)
 	mempool_destroy(virtmem_pool);
 }
 
-static void *null_alloc_ppalist(struct request_queue *q, void *pool,
+static void *null_dev_dma_alloc(struct request_queue *q, void *pool,
 				gfp_t mem_flags, dma_addr_t *dma_handler)
 {
-
-	struct sector_t *ppa_list;
 	mempool_t *virtmem_pool = pool;
 
-	ppa_list = mempool_alloc(virtmem_pool, mem_flags);
-	if (!ppa_list) {
-		pr_err("null_nvm: Unable to allocate virtual memory\n");
-		return NULL;
-	}
-
-	return ppa_list;
+	return mempool_alloc(virtmem_pool, mem_flags);
 }
 
-static void null_free_ppalist(void *pool, void *ppa_list,
+static void null_dev_dma_free(void *pool, void *ppa_list,
 							dma_addr_t dma_handler)
 {
 	mempool_t *virtmem_pool = pool;
@@ -311,7 +303,7 @@ static void null_free_ppalist(void *pool, void *ppa_list,
 }
 
 static struct nvm_dev_ops nulln_dev_ops = {
-	.identify	= null_id,
+	.identify		= null_id,
 
 	.get_features		= null_get_features,
 
@@ -319,8 +311,8 @@ static struct nvm_dev_ops nulln_dev_ops = {
 
 	.create_dma_pool	= null_create_dma_pool,
 	.destroy_dma_pool	= null_destroy_dma_pool,
-	.alloc_ppalist		= null_alloc_ppalist,
-	.free_ppalist		= null_free_ppalist,
+	.dev_dma_alloc		= null_dev_dma_alloc,
+	.dev_dma_free		= null_dev_dma_free,
 
 	/* Emulate nvme protocol */
 	.max_phys_sect		= 64,
