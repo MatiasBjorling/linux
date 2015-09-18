@@ -601,7 +601,9 @@ static void rrpc_end_io(struct nvm_rq *rqd, int error)
 	bio_put(rqd->bio);
 
 	if (npages > 1)
-		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+		nvm_dev_dma_free(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+	if (rqd->metadata)
+		nvm_dev_dma_free(rrpc->dev, rqd->metadata, rqd->dma_metadata);
 
 	mempool_free(rqd, rrpc->rq_pool);
 }
@@ -616,7 +618,7 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 	int i;
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd)) {
-		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+		nvm_dev_dma_free(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
 		return NVM_IO_REQUEUE;
 	}
 
@@ -630,7 +632,7 @@ static int rrpc_read_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 		} else {
 			BUG_ON(is_gc);
 			rrpc_unlock_laddr(rrpc, r);
-			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+			nvm_dev_dma_free(rrpc->dev, rqd->ppa_list,
 							rqd->dma_ppa_list);
 			return NVM_IO_DONE;
 		}
@@ -679,7 +681,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 	int i;
 
 	if (!is_gc && rrpc_lock_rq(rrpc, bio, rqd)) {
-		nvm_free_ppalist(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
+		nvm_dev_dma_free(rrpc->dev, rqd->ppa_list, rqd->dma_ppa_list);
 		return NVM_IO_REQUEUE;
 	}
 
@@ -689,7 +691,7 @@ static int rrpc_write_ppalist_rq(struct rrpc *rrpc, struct bio *bio,
 		if (!p) {
 			BUG_ON(is_gc);
 			rrpc_unlock_laddr(rrpc, r);
-			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+			nvm_dev_dma_free(rrpc->dev, rqd->ppa_list,
 							rqd->dma_ppa_list);
 			rrpc_gc_kick(rrpc);
 			return NVM_IO_REQUEUE;
@@ -733,7 +735,7 @@ static int rrpc_setup_rq(struct rrpc *rrpc, struct bio *bio,
 			struct nvm_rq *rqd, unsigned long flags, uint8_t npages)
 {
 	if (npages > 1) {
-		rqd->ppa_list = nvm_alloc_ppalist(rrpc->dev, GFP_KERNEL,
+		rqd->ppa_list = nvm_dev_dma_alloc(rrpc->dev, GFP_KERNEL,
 							&rqd->dma_ppa_list);
 		if (!rqd->ppa_list) {
 			pr_err("rrpc: not able to allocate ppa list\n");
@@ -804,7 +806,7 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 		return;
 	case NVM_IO_ERR:
 		if (rqd->ppa_list)
-			nvm_free_ppalist(rrpc->dev, rqd->ppa_list,
+			nvm_dev_dma_free(rrpc->dev, rqd->ppa_list,
 							rqd->dma_ppa_list);
 		bio_io_error(bio);
 		break;
