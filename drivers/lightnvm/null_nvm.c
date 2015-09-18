@@ -260,13 +260,13 @@ static int null_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 	return 0;
 }
 
-static void *null_create_ppa_pool(struct request_queue *q)
+static void *null_create_dma_pool(struct request_queue *q, char *name)
 {
 	mempool_t *virtmem_pool;
 
-	ppa_cache = kmem_cache_create("ppa_list", PAGE_SIZE, 0, 0, NULL);
+	ppa_cache = kmem_cache_create(name, PAGE_SIZE, 0, 0, NULL);
 	if (!ppa_cache) {
-		pr_err("null_nvm: Unable to craete kmem cache\n");
+		pr_err("null_nvm: Unable to create kmem cache\n");
 		return NULL;
 	}
 
@@ -279,7 +279,7 @@ static void *null_create_ppa_pool(struct request_queue *q)
 	return virtmem_pool;
 }
 
-static void null_destroy_ppa_pool(void *pool)
+static void null_destroy_dma_pool(void *pool)
 {
 	mempool_t *virtmem_pool = pool;
 
@@ -317,8 +317,8 @@ static struct nvm_dev_ops nulln_dev_ops = {
 
 	.submit_io		= null_submit_io,
 
-	.create_ppa_pool	= null_create_ppa_pool,
-	.destroy_ppa_pool	= null_destroy_ppa_pool,
+	.create_dma_pool	= null_create_dma_pool,
+	.destroy_dma_pool	= null_destroy_dma_pool,
 	.alloc_ppalist		= null_alloc_ppalist,
 	.free_ppalist		= null_free_ppalist,
 
