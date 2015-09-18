@@ -128,8 +128,8 @@ typedef int (nvm_op_bb_tbl_fn)(struct request_queue *, int, unsigned int,
 				nvm_bb_update_fn *, void *);
 typedef int (nvm_submit_io_fn)(struct request_queue *, struct nvm_rq *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
-typedef void *(nvm_create_ppapool_fn)(struct request_queue *);
-typedef void (nvm_destroy_ppapool_fn)(void *);
+typedef void *(nvm_create_dma_pool_fn)(struct request_queue *, char *);
+typedef void (nvm_destroy_dma_pool_fn)(void *);
 typedef void *(nvm_alloc_ppalist_fn)(struct request_queue *, void *, gfp_t,
 								dma_addr_t*);
 typedef void (nvm_free_ppalist_fn)(void *, void*, dma_addr_t);
@@ -145,8 +145,8 @@ struct nvm_dev_ops {
 	nvm_submit_io_fn	*submit_io;
 	nvm_erase_blk_fn	*erase_block;
 
-	nvm_create_ppapool_fn	*create_ppa_pool;
-	nvm_destroy_ppapool_fn	*destroy_ppa_pool;
+	nvm_create_dma_pool_fn	*create_dma_pool;
+	nvm_destroy_dma_pool_fn	*destroy_dma_pool;
 	nvm_alloc_ppalist_fn	*alloc_ppalist;
 	nvm_free_ppalist_fn	*free_ppalist;
 

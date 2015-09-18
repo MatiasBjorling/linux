@@ -280,7 +280,7 @@ err:
 void nvm_exit(struct nvm_dev *dev)
 {
 	if (dev->ppalist_pool)
-		dev->ops->destroy_ppa_pool(dev->ppalist_pool);
+		dev->ops->destroy_dma_pool(dev->ppalist_pool);
 	nvm_free(dev);
 
 	pr_info("nvm: successfully unloaded\n");
@@ -318,7 +318,8 @@ int nvm_register(struct request_queue *q, char *disk_name,
 	}
 
 	if (dev->ops->max_phys_sect > 1) {
-		dev->ppalist_pool = dev->ops->create_ppa_pool(dev->q);
+		dev->ppalist_pool = dev->ops->create_dma_pool(dev->q,
+								"ppalist");
 		if (!dev->ppalist_pool) {
 			pr_err("nvm: could not create ppa pool\n");
 			return -ENOMEM;
