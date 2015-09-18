@@ -289,17 +289,12 @@ static void null_destroy_dma_pool(void *pool)
 static void *null_dev_dma_alloc(struct request_queue *q, void *pool,
 				gfp_t mem_flags, dma_addr_t *dma_handler)
 {
-	mempool_t *virtmem_pool = pool;
-
-	return mempool_alloc(virtmem_pool, mem_flags);
+	return mempool_alloc(pool, mem_flags);
 }
 
-static void null_dev_dma_free(void *pool, void *ppa_list,
-							dma_addr_t dma_handler)
+static void null_dev_dma_free(void *pool, void *entry, dma_addr_t dma_handler)
 {
-	mempool_t *virtmem_pool = pool;
-
-	mempool_free(ppa_list, virtmem_pool);
+	mempool_free(entry, pool);
 }
 
 static struct nvm_dev_ops nulln_dev_ops = {
