@@ -537,17 +537,13 @@ static void nvme_nvm_destroy_dma_pool(void *pool)
 static void *nvme_nvm_dev_dma_alloc(struct request_queue *q, void *pool,
 				    gfp_t mem_flags, dma_addr_t *dma_handler)
 {
-	struct dma_pool *ppalist_pool = pool;
-
-	return dma_pool_alloc(ppalist_pool, mem_flags, dma_handler);
+	return dma_pool_alloc(pool, mem_flags, dma_handler);
 }
 
 static void nvme_nvm_dev_dma_free(void *pool, void *ppa_list,
 							dma_addr_t dma_handler)
 {
-	struct dma_pool *ppalist_pool = pool;
-
-	dma_pool_free(ppalist_pool, ppa_list, dma_handler);
+	dma_pool_free(pool, ppa_list, dma_handler);
 }
 
 static struct nvm_dev_ops nvme_nvm_dev_ops = {
