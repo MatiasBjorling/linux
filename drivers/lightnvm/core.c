@@ -71,20 +71,20 @@ void nvm_unregister_target(struct nvm_tgt_type *tt)
 }
 EXPORT_SYMBOL(nvm_unregister_target);
 
-void *nvm_alloc_ppalist(struct nvm_dev *dev, gfp_t mem_flags,
+void *nvm_dev_dma_alloc(struct nvm_dev *dev, gfp_t mem_flags,
 							dma_addr_t *dma_handler)
 {
-	return dev->ops->alloc_ppalist(dev->q, dev->ppalist_pool, mem_flags,
+	return dev->ops->dev_dma_alloc(dev->q, dev->ppalist_pool, mem_flags,
 								dma_handler);
 }
-EXPORT_SYMBOL(nvm_alloc_ppalist);
+EXPORT_SYMBOL(nvm_dev_dma_alloc);
 
-void nvm_free_ppalist(struct nvm_dev *dev, void *ppa_list,
+void nvm_dev_dma_free(struct nvm_dev *dev, void *ppa_list,
 							dma_addr_t dma_handler)
 {
-	dev->ops->free_ppalist(dev->ppalist_pool, ppa_list, dma_handler);
+	dev->ops->dev_dma_free(dev->ppalist_pool, ppa_list, dma_handler);
 }
-EXPORT_SYMBOL(nvm_free_ppalist);
+EXPORT_SYMBOL(nvm_dev_dma_free);
 
 struct nvm_bm_type *nvm_find_bm_type(const char *name)
 {

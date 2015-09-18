@@ -130,9 +130,9 @@ typedef int (nvm_submit_io_fn)(struct request_queue *, struct nvm_rq *);
 typedef int (nvm_erase_blk_fn)(struct request_queue *, sector_t);
 typedef void *(nvm_create_dma_pool_fn)(struct request_queue *, char *);
 typedef void (nvm_destroy_dma_pool_fn)(void *);
-typedef void *(nvm_alloc_ppalist_fn)(struct request_queue *, void *, gfp_t,
+typedef void *(nvm_dev_dma_alloc_fn)(struct request_queue *, void *, gfp_t,
 								dma_addr_t*);
-typedef void (nvm_free_ppalist_fn)(void *, void*, dma_addr_t);
+typedef void (nvm_dev_dma_free_fn)(void *, void*, dma_addr_t);
 
 struct nvm_dev_ops {
 	nvm_id_fn		*identify;
@@ -147,8 +147,8 @@ struct nvm_dev_ops {
 
 	nvm_create_dma_pool_fn	*create_dma_pool;
 	nvm_destroy_dma_pool_fn	*destroy_dma_pool;
-	nvm_alloc_ppalist_fn	*alloc_ppalist;
-	nvm_free_ppalist_fn	*free_ppalist;
+	nvm_dev_dma_alloc_fn	*dev_dma_alloc;
+	nvm_dev_dma_free_fn	*dev_dma_free;
 
 	int			dev_sector_size;
 	uint8_t			max_phys_sect;
@@ -233,8 +233,8 @@ struct nvm_tgt_type {
 extern int nvm_register_target(struct nvm_tgt_type *);
 extern void nvm_unregister_target(struct nvm_tgt_type *);
 
-extern void *nvm_alloc_ppalist(struct nvm_dev *, gfp_t, dma_addr_t *);
-extern void nvm_free_ppalist(struct nvm_dev *, void *, dma_addr_t);
+extern void *nvm_dev_dma_alloc(struct nvm_dev *, gfp_t, dma_addr_t *);
+extern void nvm_dev_dma_free(struct nvm_dev *, void *, dma_addr_t);
 
 typedef int (nvm_bm_register_fn)(struct nvm_dev *);
 typedef void (nvm_bm_unregister_fn)(struct nvm_dev *);
