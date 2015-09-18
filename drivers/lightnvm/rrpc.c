@@ -796,6 +796,7 @@ static void rrpc_make_rq(struct request_queue *q, struct bio *bio)
 		bio_io_error(bio);
 		return;
 	}
+	memset(rqd, 0, sizeof(struct nvm_rq));
 
 	err = rrpc_submit_io(rrpc, bio, rqd, NVM_IOTYPE_NONE);
 	switch (err) {
