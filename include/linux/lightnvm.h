@@ -94,11 +94,14 @@ struct nvm_rq {
 		sector_t *ppa_list;
 	};
 
-	unsigned short opcode;
-
 	/*DMA handler to be used by underlying devices supporting DMA*/
 	dma_addr_t dma_ppa_list;
-	uint8_t npages;
+
+	void *metadata;
+	dma_addr_t dma_metadata;
+
+	unsigned short opcode;
+	unsigned char npages;
 };
 
 static inline struct nvm_rq *nvm_rq_from_pdu(void *pdu)
