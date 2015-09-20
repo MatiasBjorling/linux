@@ -577,10 +577,28 @@ void nvme_nvm_unregister(char *disk_name)
 {
 	nvm_unregister(disk_name);
 }
+
+int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
+{
+	struct nvme_dev *dev = ns->dev;
+	struct pci_dev *pdev = to_pci_dev(dev->dev);
+
+	/* QEMU NVMe simulator - LightNVM detection*/
+	if (pdev->vendor == PCI_VENDOR_ID_INTEL && pdev->device == 0x5845 &&
+							id->vs[0] == 0x1)
+		return 1;
+
+	/* CNEX Labs */
+	if (pdev->vendor == 0x1d1d && pdev->device == 0x2807)
+		return 1;
+
+	return 0;
+}
 #else
 int nvme_nvm_register(struct request_queue *q, char *disk_name)
 {
 	return 0;
 }
 void nvme_nvm_unregister(char *disk_name) {};
+int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id);
 #endif /* CONFIG_NVM */

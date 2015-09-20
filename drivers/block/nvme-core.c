@@ -1713,8 +1713,7 @@ static int nvme_configure_admin_queue(struct nvme_dev *dev)
 
 	dev->page_size = 1 << page_shift;
 
-	dev->ctrl_config = NVME_CAP_LIGHTNVM(cap) ?
-					NVME_CC_CSS_LIGHTNVM : NVME_CC_CSS_NVM;
+	dev->ctrl_config =  NVME_CC_CSS_NVM;
 	dev->ctrl_config |= (page_shift - 12) << NVME_CC_MPS_SHIFT;
 	dev->ctrl_config |= NVME_CC_ARB_RR | NVME_CC_SHN_NONE;
 	dev->ctrl_config |= NVME_CC_IOSQES | NVME_CC_IOCQES;
@@ -1960,8 +1959,7 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 		return -ENODEV;
 	}
 
-	if ((dev->ctrl_config & NVME_CC_CSS_LIGHTNVM) &&
-		id->nsfeat & NVME_NS_FEAT_NVM && ns->type != NVME_NS_NVM) {
+	if (nvme_nvm_ns_supported(ns, id) && ns->type != NVME_NS_NVM) {
 		if (nvme_nvm_register(ns->queue, disk->disk_name)) {
 			dev_warn(dev->dev,
 				    "%s: LightNVM init failure\n", __func__);
