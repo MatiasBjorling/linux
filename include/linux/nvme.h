@@ -59,6 +59,8 @@ enum {
 	NVME_CSTS_SHST_OCCUR	= 1 << 2,
 	NVME_CSTS_SHST_CMPLT	= 2 << 2,
 	NVME_CSTS_SHST_MASK	= 3 << 2,
+
+	NVME_NS_LIGHTNVM	= 1,
 };
 
 extern unsigned char nvme_io_timeout;

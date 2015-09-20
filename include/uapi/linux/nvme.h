@@ -146,8 +146,6 @@ enum {
 	NVME_NS_DPS_PI_TYPE1	= 1,
 	NVME_NS_DPS_PI_TYPE2	= 2,
 	NVME_NS_DPS_PI_TYPE3	= 3,
-
-	NVME_NS_NVM		= 1,
 };
 
 struct nvme_smart_log {

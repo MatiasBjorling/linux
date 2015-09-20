@@ -1959,14 +1959,14 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 		return -ENODEV;
 	}
 
-	if (nvme_nvm_ns_supported(ns, id) && ns->type != NVME_NS_NVM) {
+	if (nvme_nvm_ns_supported(ns, id) && ns->type != NVME_NS_LIGHTNVM) {
 		if (nvme_nvm_register(ns->queue, disk->disk_name)) {
 			dev_warn(dev->dev,
 				    "%s: LightNVM init failure\n", __func__);
 			kfree(id);
 			return -ENODEV;
 		}
-		ns->type = NVME_NS_NVM;
+		ns->type = NVME_NS_LIGHTNVM;
 	}
 
 	old_ms = ns->ms;
@@ -2000,7 +2000,8 @@ static int nvme_revalidate_disk(struct gendisk *disk)
 								!ns->ext)
 		nvme_init_integrity(ns);
 
-	if ((ns->ms && !blk_get_integrity(disk)) || ns->type == NVME_NS_NVM)
+	if ((ns->ms && !blk_get_integrity(disk))
+						|| ns->type == NVME_NS_LIGHTNVM)
 		set_capacity(disk, 0);
 	else
 		set_capacity(disk, le64_to_cpup(&id->nsze) << (ns->lba_shift - 9));
@@ -2118,7 +2119,7 @@ static void nvme_alloc_ns(struct nvme_dev *dev, unsigned nsid)
 	if (nvme_revalidate_disk(ns->disk))
 		goto out_free_disk;
 
-	if (ns->type != NVME_NS_NVM) {
+	if (ns->type != NVME_NS_LIGHTNVM) {
 		add_disk(ns->disk);
 		if (ns->ms) {
 			struct block_device *bd = bdget_disk(ns->disk, 0);
@@ -2258,7 +2259,7 @@ static void nvme_free_namespace(struct nvme_ns *ns)
 {
 	list_del(&ns->list);
 
-	if (ns->type == NVME_NS_NVM)
+	if (ns->type == NVME_NS_LIGHTNVM)
 		nvme_nvm_unregister(ns->disk->disk_name);
 
 	spin_lock(&dev_list_lock);
