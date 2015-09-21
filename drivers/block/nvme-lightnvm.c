@@ -445,16 +445,16 @@ static inline void nvme_nvm_rqtocmd(struct request *rq, struct nvm_rq *rqd,
 				struct nvme_ns *ns, struct nvme_nvm_command *c)
 {
 	switch (rqd->opcode) {
-		case NVM_OP_HBWRITE:
-		case NVM_OP_HBREAD:
-			nvme_nvm_cmd_hybrid(rqd, ns, c);
+	case NVM_OP_HBWRITE:
+	case NVM_OP_HBREAD:
+		nvme_nvm_cmd_hybrid(rqd, ns, c);
 		break;
-		case NVM_OP_PWRITE:
-		case NVM_OP_PREAD:
-			nvme_nvm_cmd_phys(rqd, ns, c);
+	case NVM_OP_PWRITE:
+	case NVM_OP_PREAD:
+		nvme_nvm_cmd_phys(rqd, ns, c);
 		break;
-		default:
-			pr_err("nvm: invalid opcode\n");
+	default:
+		pr_err("nvm: invalid opcode\n");
 	}
 }
 
@@ -600,5 +600,8 @@ int nvme_nvm_register(struct request_queue *q, char *disk_name)
 	return 0;
 }
 void nvme_nvm_unregister(char *disk_name) {};
-int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id);
+int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
+{
+	return 0;
+}
 #endif /* CONFIG_NVM */
