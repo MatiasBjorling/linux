@@ -765,7 +765,7 @@ static long nvm_ioctl_dev_remove(struct file *file, void __user *arg)
 	if (copy_from_user(&remove, arg, sizeof(struct nvm_ioctl_remove)))
 		return -EFAULT;
 
-	remove.tgtname[DISK_NAME_LEN -1] = '\0';
+	remove.tgtname[DISK_NAME_LEN - 1] = '\0';
 
 	if (remove.flags != 0) {
 		pr_err("nvm: no flags supported\n");
@@ -801,9 +801,9 @@ static const struct file_operations _ctl_fops = {
 
 static struct miscdevice _nvm_misc = {
 	.minor		= MISC_DYNAMIC_MINOR,
-	.name  		= "lightnvm",
+	.name		= "lightnvm",
 	.nodename	= "lightnvm/control",
-	.fops  		= &_ctl_fops,
+	.fops		= &_ctl_fops,
 };
 
 MODULE_ALIAS_MISCDEV(MISC_DYNAMIC_MINOR);
@@ -826,7 +826,7 @@ static void __exit nvm_mod_exit(void)
 }
 
 MODULE_AUTHOR("Matias Bjorling <m@bjorling.me>");
-MODULE_LICENSE("GPL2");
+MODULE_LICENSE("GPL v2");
 MODULE_VERSION("0.1");
 module_init(nvm_mod_init);
 module_exit(nvm_mod_exit);

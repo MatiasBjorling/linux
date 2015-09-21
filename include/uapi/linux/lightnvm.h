@@ -85,7 +85,7 @@ struct nvm_ioctl_create_conf {
 };
 
 struct nvm_ioctl_create {
-	char dev[DISK_NAME_LEN];			/* open-channel SSD device */
+	char dev[DISK_NAME_LEN];		/* open-channel SSD device */
 	char tgttype[NVM_TTYPE_NAME_MAX];	/* target type name */
 	char tgtname[DISK_NAME_LEN];		/* dev to expose target as */
 
