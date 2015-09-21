@@ -41,5 +41,8 @@ config NVM_BM_HB
 
 config NVM_NULL_NVM
 	tristate "Null test LightNVM driver"
+	---help---
+	The null test driver can be used to evaluate targets without an
+	underlying device.
 
 endif # NVM
