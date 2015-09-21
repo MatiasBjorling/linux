@@ -1203,10 +1203,8 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 	int ret;
 
 	rrpc = kzalloc(sizeof(struct rrpc), GFP_KERNEL);
-	if (!rrpc) {
-		ret = -ENOMEM;
-		goto err;
-	}
+	if (!rrpc)
+		return ERR_PTR(-ENOMEM);
 
 	rrpc->instance.tt = &tt_rrpc;
 	rrpc->dev = dev;
