@@ -185,32 +185,28 @@ static int null_id(struct request_queue *q, struct nvm_id *id)
 	sector_t size = gb * 1024 * 1024 * 1024ULL;
 	unsigned long per_chnl_size =
 				size / bs / num_channels;
-	struct nvm_id_chnl *chnl;
+	struct nvm_id_group *grp;
 	int i;
 
 	id->ver_id = 0x1;
-	id->nvm_type = NVM_NVMT_BLK;
-	id->nchannels = num_channels;
+	id->ngroups = 1;
 
-	id->chnls = kmalloc_array(id->nchannels, sizeof(struct nvm_id_chnl),
-								GFP_KERNEL);
-	if (!id->chnls)
-		return -ENOMEM;
-
-	for (i = 0; i < id->nchannels; i++) {
-		chnl = &id->chnls[i];
-		chnl->queue_size = hw_queue_depth;
-		chnl->gran_read = bs;
-		chnl->gran_write = bs;
-		chnl->gran_erase = bs * 256;
-		chnl->oob_size = 0;
-		chnl->t_r = chnl->t_sqr = 25000; /* 25us */
-		chnl->t_w = chnl->t_sqw = 500000; /* 500us */
-		chnl->t_e = 1500000; /* 1.500us */
-		chnl->io_sched = NVM_IOSCHED_CHANNEL;
-		chnl->laddr_begin = per_chnl_size * i;
-		chnl->laddr_end = per_chnl_size * (i + 1) - 1;
-	}
+	grp = &id->groups[0];
+	grp->laddr_begin = 0;
+	grp->queue_size = hw_queue_depth;
+	grp->channels = 1;
+	grp->luns_per_chnl = num_channels;
+	grp->sec_per_pg = 1;
+	grp->pgs_per_blk = 256;
+	grp->blks = per_chnl_size / 256;
+	grp->planes = 1;
+	grp->sec_size = 4096;
+	grp->oob_size = 0;
+	grp->t_r = grp->t_sqr = 25000; /* 25us */
+	grp->t_w = grp->t_sqw = 500000; /* 500us */
+	grp->t_e = 1500000; /* 1.500us */
+	grp->plane_mode = NVM_PLANE_SINGLE;
+	grp->addr_mode = NVM_ADDRMODE_LINEAR;
 
 	return 0;
 }
@@ -227,9 +223,9 @@ static int null_get_features(struct request_queue *q,
 static void null_end_io(struct request *rq, int error)
 {
 	struct nvm_rq *rqd = rq->end_io_data;
-	struct nvm_tgt_instance *ins = rqd->ins;
+	struct nvm_dev *dev = rqd->dev;
 
-	ins->tt->end_io(rq->end_io_data, error);
+	dev->bm->end_io(rqd, error);
 
 	blk_put_request(rq);
 }
