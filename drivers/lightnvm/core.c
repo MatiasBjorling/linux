@@ -150,27 +150,49 @@ EXPORT_SYMBOL(nvm_put_blk);
 
 int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
-	return dev->ops->submit_io(dev->q, rqd);
+	return dev->bm->submit_io(dev, rqd);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
 /* Send erase command to device */
 int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	return dev->bm->erase_blk(dev, blk);
+	return dev->bm->erase_blk(dev, blk, 0);
 }
 EXPORT_SYMBOL(nvm_erase_blk);
 
 static void nvm_core_free(struct nvm_dev *dev)
 {
-	kfree(dev->identity.chnls);
 	kfree(dev);
 }
 
 static int nvm_core_init(struct nvm_dev *dev)
 {
-	dev->nr_luns = dev->identity.nchannels;
-	dev->sector_size = dev->ops->dev_sector_size;
+	struct nvm_id_group *grp = &dev->identity.groups[0];
+
+	/* device values */
+	dev->nr_chnls = grp->channels;
+	dev->luns_per_chnl = grp->luns_per_chnl;
+	dev->sec_per_pg = grp->sec_per_pg;
+	dev->pgs_per_blk = grp->pgs_per_blk;
+	dev->blks_per_lun = grp->blks;
+	dev->nr_planes = grp->planes;
+	dev->sec_size = grp->sec_size;
+	dev->oob_size = grp->oob_size;
+	dev->plane_mode = grp->plane_mode;
+	dev->addr_mode = grp->addr_mode;
+
+	/* calculated values */
+	dev->sec_per_pl = dev->sec_per_pg * dev->nr_planes;
+	dev->sec_per_blk = dev->sec_per_pl * dev->pgs_per_blk;
+	dev->sec_per_lun = dev->sec_per_blk * dev->blks_per_lun;
+	dev->nr_luns = dev->luns_per_chnl * dev->nr_chnls;
+
+	dev->total_blocks = dev->nr_planes *
+				dev->blks_per_lun *
+				dev->luns_per_chnl *
+				dev->nr_chnls;
+	dev->total_pages = dev->total_blocks * dev->pgs_per_blk;
 	INIT_LIST_HEAD(&dev->online_targets);
 
 	return 0;
@@ -223,31 +245,35 @@ int nvm_init(struct nvm_dev *dev)
 		goto err;
 	}
 
-	pr_debug("nvm dev: ver %u type %u chnls %u\n",
-			dev->identity.ver_id,
-			dev->identity.nvm_type,
-			dev->identity.nchannels);
+	pr_debug("nvm: ver:%x nvm_vendor:%x chnls:%u\n",
+			dev->identity.ver_id, dev->identity.nvm_vendor,
+							dev->identity.ngroups);
+
+	if (dev->identity.ver_id != 1) {
+		pr_err("nvm: device not supported by kernel.");
+		goto err;
+	}
+
+	if (dev->identity.ngroups != 1) {
+		pr_err("nvm: only single group configuration supported.");
+		goto err;
+	}
 
 	ret = nvm_validate_features(dev);
 	if (ret) {
-		pr_err("nvm: disk features are not supported.");
+		pr_err("nvm: disk features not supported.");
 		goto err;
 	}
 
 	ret = nvm_validate_responsibility(dev);
 	if (ret) {
-		pr_err("nvm: disk responsibilities are not supported.");
+		pr_err("nvm: disk responsibilities not supported.");
 		goto err;
 	}
 
 	ret = nvm_core_init(dev);
 	if (ret) {
 		pr_err("nvm: could not initialize core structures.\n");
-		goto err;
-	}
-
-	if (!dev->nr_luns) {
-		pr_err("nvm: device did not expose any luns.\n");
 		goto err;
 	}
 
@@ -267,9 +293,10 @@ int nvm_init(struct nvm_dev *dev)
 		return 0;
 	}
 
-	pr_info("nvm: registered %s with luns: %u blocks: %lu sector size: %d\n",
-		dev->name, dev->nr_luns, dev->total_blocks, dev->sector_size);
-
+	pr_info("nvm: registered %s [secprpg: %u pls: %u pgsprblk: %u blks: %u luns: %u chnl: %u]\n",
+			dev->name, dev->sec_per_pg, dev->nr_planes,
+			dev->pgs_per_blk, dev->blks_per_lun, dev->nr_luns,
+			dev->nr_chnls);
 	return 0;
 err:
 	nvm_free(dev);
@@ -313,8 +340,8 @@ int nvm_register(struct request_queue *q, char *disk_name,
 	up_write(&nvm_lock);
 
 	if (dev->ops->max_phys_sect > 256) {
-		pr_info("nvm: maximum number of sectors supported in target is 255. max_phys_sect set to 255\n");
-		dev->ops->max_phys_sect = 255;
+		pr_info("nvm: max sectors supported by device is 256.\n");
+		return -EINVAL;
 	}
 
 	if (dev->ops->max_phys_sect > 1) {
@@ -656,11 +683,11 @@ static long nvm_ioctl_info(struct file *file, void __user *arg)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	info = kzalloc(sizeof(struct nvm_ioctl_create), GFP_KERNEL);
+	info = kzalloc(sizeof(struct nvm_ioctl_info), GFP_KERNEL);
 	if (!info)
 		return -ENOMEM;
 
-	if (copy_from_user(info, arg, sizeof(struct nvm_ioctl_create)))
+	if (copy_from_user(info, arg, sizeof(struct nvm_ioctl_info)))
 		return -EFAULT;
 
 	info->version[0] = NVM_VERSION_MAJOR;
@@ -682,7 +709,7 @@ static long nvm_ioctl_info(struct file *file, void __user *arg)
 	info->tgtsize = tgt_iter;
 	up_write(&nvm_lock);
 
-	if (copy_to_user(arg, info, sizeof(struct nvm_ioctl_create)))
+	if (copy_to_user(arg, info, sizeof(struct nvm_ioctl_info)))
 		return -EFAULT;
 
 	kfree(info);
