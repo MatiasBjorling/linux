@@ -43,44 +43,24 @@ static void hb_luns_free(struct nvm_dev *dev)
 static int hb_luns_init(struct nvm_dev *dev, struct bm_hb *bm)
 {
 	struct bm_lun *lun;
-	struct nvm_id_chnl *chnl;
 	int i;
 
-	bm->luns = kcalloc(bm->nr_luns, sizeof(struct bm_lun), GFP_KERNEL);
+	bm->luns = kcalloc(dev->nr_luns, sizeof(struct bm_lun), GFP_KERNEL);
 	if (!bm->luns)
 		return -ENOMEM;
 
 	bm_for_each_lun(bm, lun, i) {
-		chnl = &dev->identity.chnls[i];
-		pr_info("bm_hb: p %u qsize %u gr %u ge %u begin %llu end %llu\n",
-			i, chnl->queue_size, chnl->gran_read, chnl->gran_erase,
-			chnl->laddr_begin, chnl->laddr_end);
-
 		spin_lock_init(&lun->vlun.lock);
-
 		INIT_LIST_HEAD(&lun->free_list);
 		INIT_LIST_HEAD(&lun->used_list);
 		INIT_LIST_HEAD(&lun->bb_list);
 
-		lun->vlun.id = i;
-		lun->chnl = chnl;
 		lun->reserved_blocks = 2; /* for GC only */
-		lun->vlun.nr_blocks =
-				(chnl->laddr_end - chnl->laddr_begin + 1) /
-				(chnl->gran_erase / chnl->gran_read);
-		lun->vlun.nr_free_blocks = lun->vlun.nr_blocks;
-		lun->vlun.nr_pages_per_blk =
-				chnl->gran_erase / chnl->gran_write *
-					(chnl->gran_write / dev->sector_size);
-
-		if (lun->vlun.nr_pages_per_blk > dev->max_pages_per_blk)
-			dev->max_pages_per_blk = lun->vlun.nr_pages_per_blk;
-
-		dev->total_pages += lun->vlun.nr_blocks *
-						lun->vlun.nr_pages_per_blk;
-		dev->total_blocks += lun->vlun.nr_blocks;
+		lun->vlun.id = i;
+		lun->vlun.lun_id = i % dev->luns_per_chnl;
+		lun->vlun.chnl_id = i / dev->luns_per_chnl;
+		lun->vlun.nr_free_blocks = dev->blks_per_lun;
 	}
-
 	return 0;
 }
 
@@ -113,12 +93,10 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 {
 	struct nvm_dev *dev = private;
 	struct bm_hb *bm = dev->bmp;
-	sector_t max_pages = dev->total_pages * (dev->sector_size >> 9);
+	sector_t max_pages = dev->total_pages * (dev->sec_size >> 9);
 	u64 elba = slba + nlb;
 	struct bm_lun *lun;
 	struct nvm_block *blk;
-	sector_t total_pgs_per_lun = /* each lun have the same configuration */
-		 bm->luns[0].vlun.nr_blocks * bm->luns[0].vlun.nr_pages_per_blk;
 	u64 i;
 	int lun_id;
 
@@ -142,12 +120,12 @@ static int hb_block_map(u64 slba, u64 nlb, u64 *entries, void *private)
 			continue;
 
 		/* resolve block from physical address */
-		lun_id = pba / total_pgs_per_lun;
+		lun_id = pba / dev->sec_per_lun;
 		lun = &bm->luns[lun_id];
 
 		/* Calculate block offset into lun */
-		pba = pba - (total_pgs_per_lun * lun_id);
-		blk = &lun->vlun.blocks[pba / lun->vlun.nr_pages_per_blk];
+		pba = pba - (dev->sec_per_lun * lun_id);
+		blk = &lun->vlun.blocks[pba / dev->sec_per_blk];
 
 		if (!blk->type) {
 			/* at this point, we don't know anything about the
@@ -171,11 +149,11 @@ static int hb_blocks_init(struct nvm_dev *dev, struct bm_hb *bm)
 
 	bm_for_each_lun(bm, lun, lun_iter) {
 		lun->vlun.blocks = vzalloc(sizeof(struct nvm_block) *
-						lun->vlun.nr_blocks);
+							dev->blks_per_lun);
 		if (!lun->vlun.blocks)
 			return -ENOMEM;
 
-		for (blk_iter = 0; blk_iter < lun->vlun.nr_blocks; blk_iter++) {
+		for (blk_iter = 0; blk_iter < dev->blks_per_lun; blk_iter++) {
 			block = &lun->vlun.blocks[blk_iter];
 
 			INIT_LIST_HEAD(&block->list);
@@ -192,7 +170,7 @@ static int hb_blocks_init(struct nvm_dev *dev, struct bm_hb *bm)
 
 		if (dev->ops->get_bb_tbl) {
 			ret = dev->ops->get_bb_tbl(dev->q, lun->vlun.id,
-			lun->vlun.nr_blocks, hb_block_bb, bm);
+					dev->blks_per_lun, hb_block_bb, bm);
 			if (ret)
 				pr_err("bm_hb: could not read BB table\n");
 		}
@@ -276,6 +254,7 @@ static struct nvm_block *hb_get_blk(struct nvm_dev *dev, struct nvm_lun *vlun,
 
 	blk = list_first_entry(&lun->free_list, struct nvm_block, list);
 	list_move_tail(&blk->list, &lun->used_list);
+	blk->type = 1;
 
 	lun->vlun.nr_free_blocks--;
 
@@ -291,10 +270,44 @@ static void hb_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 
 	spin_lock(&vlun->lock);
 
-	list_move_tail(&blk->list, &lun->free_list);
-	lun->vlun.nr_free_blocks++;
+	switch (blk->type) {
+	case 1:
+		list_move_tail(&blk->list, &lun->free_list);
+		lun->vlun.nr_free_blocks++;
+		blk->type = 0;
+		break;
+	case 2:
+		list_move_tail(&blk->list, &lun->bb_list);
+		break;
+	default:
+		BUG();
+	}
 
 	spin_unlock(&vlun->lock);
+}
+
+static void hb_addr_to_generic_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
+{
+	int i;
+
+	if (rqd->nr_pages > 1)
+		for (i = 0; i < rqd->nr_pages; i++)
+			rqd->ppa_list[i] = addr_to_generic_mode(dev,
+							rqd->ppa_list[i]);
+	else
+		rqd->ppa_addr = addr_to_generic_mode(dev, rqd->ppa_addr);
+}
+
+static void hb_generic_to_addr_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
+{
+	int i;
+
+	if (rqd->nr_pages > 1)
+		for (i = 0; i < rqd->nr_pages; i++)
+			rqd->ppa_list[i] = generic_to_addr_mode(dev,
+							rqd->ppa_list[i]);
+	else
+		rqd->ppa_addr = generic_to_addr_mode(dev, rqd->ppa_addr);
 }
 
 static int hb_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
@@ -302,29 +315,109 @@ static int hb_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 	if (!dev->ops->submit_io)
 		return 0;
 
+	/* Convert address space */
+	hb_generic_to_addr_mode(dev, rqd);
+
+	rqd->dev = dev;
 	return dev->ops->submit_io(dev->q, rqd);
+}
+
+static void hb_blk_set_type(struct nvm_dev *dev, struct ppa_addr *ppa, int type)
+{
+	struct bm_hb *bm = dev->bmp;
+	struct bm_lun *lun;
+	struct nvm_block *blk;
+
+	BUG_ON(ppa->g.ch > dev->nr_chnls);
+	BUG_ON(ppa->g.lun > dev->luns_per_chnl);
+	BUG_ON(ppa->g.blk > dev->blks_per_lun);
+
+	lun = &bm->luns[ppa->g.lun * ppa->g.ch];
+	blk = &lun->vlun.blocks[ppa->g.blk];
+
+	/* will be moved to bb list on put_blk from target */
+	blk->type = type;
+}
+
+/* mark block bad. It is expected the target recover from the error. */
+static void hb_mark_blk_bad(struct nvm_dev *dev, struct nvm_rq *rqd)
+{
+	int i;
+
+	if (!dev->ops->set_bb)
+		return;
+
+	if (dev->ops->set_bb(dev->q, rqd, 1))
+		return;
+
+	return 0;
+	hb_addr_to_generic_mode(dev, rqd);
+
+	/* look up blocks and mark them as bad */
+	if (rqd->nr_pages > 1)
+		for (i = 0; i < rqd->nr_pages; i++)
+			hb_blk_set_type(dev, &rqd->ppa_list[i], 2);
+	else
+		hb_blk_set_type(dev, &rqd->ppa_addr, 2);
 }
 
 static void hb_end_io(struct nvm_rq *rqd, int error)
 {
 	struct nvm_tgt_instance *ins = rqd->ins;
 
+	if (error == NVM_RSP_ERR_FAILWRITE)
+		hb_mark_blk_bad(rqd->dev, rqd);
+
 	ins->tt->end_io(rqd, error);
 }
 
-static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
+static int hb_erase_blk(struct nvm_dev *dev, struct nvm_block *blk,
+							unsigned long flags)
 {
+	int plane_cnt = 0, pl_idx, ret;
+	struct ppa_addr addr;
+	struct nvm_rq rqd;
+
 	if (!dev->ops->erase_block)
 		return 0;
 
-	return dev->ops->erase_block(dev->q, blk->id);
+	addr = block_to_ppa(dev, blk);
+
+	if (dev->plane_mode == NVM_PLANE_SINGLE) {
+		rqd.nr_pages = 1;
+		rqd.ppa_addr = addr;
+	} else {
+		plane_cnt = (1 << dev->plane_mode);
+		rqd.nr_pages = plane_cnt;
+
+		rqd.ppa_list = nvm_dev_dma_alloc(dev, GFP_KERNEL,
+							&rqd.dma_ppa_list);
+		if (!rqd.ppa_list) {
+			pr_err("bm_hb: failed to allocate dma memory\n");
+			return -ENOMEM;
+		}
+
+		for (pl_idx = 0; pl_idx < plane_cnt; pl_idx++) {
+			addr.g.pl = pl_idx;
+			rqd.ppa_list[pl_idx] = addr;
+		}
+	}
+
+	hb_generic_to_addr_mode(dev, &rqd);
+
+	ret = dev->ops->erase_block(dev->q, &rqd);
+
+	if (plane_cnt)
+		nvm_dev_dma_free(dev, rqd.ppa_list, rqd.dma_ppa_list);
+
+	return ret;
 }
 
-static struct nvm_lun *hb_get_luns(struct nvm_dev *dev, int begin, int end)
+static struct nvm_lun *hb_get_lun(struct nvm_dev *dev, int lunid)
 {
 	struct bm_hb *bm = dev->bmp;
 
-	return &bm->luns[begin].vlun;
+	return &bm->luns[lunid].vlun;
 }
 
 static void hb_free_blocks_print(struct nvm_dev *dev)
@@ -352,7 +445,7 @@ static struct nvm_bm_type bm_hb = {
 	.end_io		= hb_end_io,
 	.erase_blk	= hb_erase_blk,
 
-	.get_luns	= hb_get_luns,
+	.get_lun	= hb_get_lun,
 	.free_blocks_print = hb_free_blocks_print,
 };
 

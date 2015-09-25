@@ -30,8 +30,6 @@ struct bm_lun {
 					 * and ready for use */
 	struct list_head bb_list;	/* Bad blocks. Mutually exclusive with
 					   free_list and used_list */
-
-	struct nvm_id_chnl *chnl;
 };
 
 struct bm_hb {
