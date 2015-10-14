@@ -224,7 +224,7 @@ static void null_end_io(struct request *rq, int error)
 	struct nvm_rq *rqd = rq->end_io_data;
 	struct nvm_dev *dev = rqd->dev;
 
-	dev->bm->end_io(rqd, error);
+	dev->mt->end_io(rqd, error);
 
 	blk_put_request(rq);
 }
