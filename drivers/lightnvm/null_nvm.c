@@ -186,7 +186,6 @@ static int null_id(struct request_queue *q, struct nvm_id *id)
 	unsigned long per_chnl_size =
 				size / bs / num_channels;
 	struct nvm_id_group *grp;
-	int i;
 
 	id->ver_id = 0x1;
 	id->ngroups = 1;
