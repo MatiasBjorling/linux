@@ -446,7 +446,7 @@ static void nvme_nvm_end_io(struct request *rq, int error)
 		pr_err("nvme: err status: %x result: %lx\n",
 				rq->errors, (unsigned long)rq->special);
 
-	dev->bm->end_io(rqd, error);
+	dev->mt->end_io(rqd, error);
 
 	kfree(rq->cmd);
 	blk_mq_free_request(rq);
