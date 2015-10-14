@@ -350,7 +350,6 @@ static void hb_mark_blk_bad(struct nvm_dev *dev, struct nvm_rq *rqd)
 	if (dev->ops->set_bb(dev->q, rqd, 1))
 		return;
 
-	return 0;
 	hb_addr_to_generic_mode(dev, rqd);
 
 	/* look up blocks and mark them as bad */
