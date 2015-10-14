@@ -30,7 +30,7 @@
 #include <uapi/linux/lightnvm.h>
 
 static LIST_HEAD(nvm_targets);
-static LIST_HEAD(nvm_bms);
+static LIST_HEAD(nvm_mgrs);
 static LIST_HEAD(nvm_devices);
 static DECLARE_RWSEM(nvm_lock);
 
@@ -86,42 +86,42 @@ void nvm_dev_dma_free(struct nvm_dev *dev, void *ppa_list,
 }
 EXPORT_SYMBOL(nvm_dev_dma_free);
 
-struct nvm_bm_type *nvm_find_bm_type(const char *name)
+static struct nvmm_type *nvm_find_mgr_type(const char *name)
 {
-	struct nvm_bm_type *bt;
+	struct nvmm_type *mt;
 
-	list_for_each_entry(bt, &nvm_bms, list)
-		if (!strcmp(name, bt->name))
-			return bt;
+	list_for_each_entry(mt, &nvm_mgrs, list)
+		if (!strcmp(name, mt->name))
+			return mt;
 
 	return NULL;
 }
 
-int nvm_register_bm(struct nvm_bm_type *bt)
+int nvm_register_mgr(struct nvmm_type *mt)
 {
 	int ret = 0;
 
 	down_write(&nvm_lock);
-	if (nvm_find_bm_type(bt->name))
+	if (nvm_find_mgr_type(mt->name))
 		ret = -EEXIST;
 	else
-		list_add(&bt->list, &nvm_bms);
+		list_add(&mt->list, &nvm_mgrs);
 	up_write(&nvm_lock);
 
 	return ret;
 }
-EXPORT_SYMBOL(nvm_register_bm);
+EXPORT_SYMBOL(nvm_register_mgr);
 
-void nvm_unregister_bm(struct nvm_bm_type *bt)
+void nvm_unregister_mgr(struct nvmm_type *mt)
 {
-	if (!bt)
+	if (!mt)
 		return;
 
 	down_write(&nvm_lock);
-	list_del(&bt->list);
+	list_del(&mt->list);
 	up_write(&nvm_lock);
 }
-EXPORT_SYMBOL(nvm_unregister_bm);
+EXPORT_SYMBOL(nvm_unregister_mgr);
 
 struct nvm_dev *nvm_find_nvm_dev(const char *name)
 {
@@ -137,27 +137,27 @@ struct nvm_dev *nvm_find_nvm_dev(const char *name)
 struct nvm_block *nvm_get_blk(struct nvm_dev *dev, struct nvm_lun *lun,
 							unsigned long flags)
 {
-	return dev->bm->get_blk(dev, lun, flags);
+	return dev->mt->get_blk(dev, lun, flags);
 }
 EXPORT_SYMBOL(nvm_get_blk);
 
 /* Assumes that all valid pages have already been moved on release to bm */
 void nvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	return dev->bm->put_blk(dev, blk);
+	return dev->mt->put_blk(dev, blk);
 }
 EXPORT_SYMBOL(nvm_put_blk);
 
 int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
-	return dev->bm->submit_io(dev, rqd);
+	return dev->mt->submit_io(dev, rqd);
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
 /* Send erase command to device */
 int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
-	return dev->bm->erase_blk(dev, blk, 0);
+	return dev->mt->erase_blk(dev, blk, 0);
 }
 EXPORT_SYMBOL(nvm_erase_blk);
 
@@ -203,8 +203,8 @@ static void nvm_free(struct nvm_dev *dev)
 	if (!dev)
 		return;
 
-	if (dev->bm)
-		dev->bm->unregister_bm(dev);
+	if (dev->mt)
+		dev->mt->unregister_mgr(dev);
 
 	nvm_core_free(dev);
 }
@@ -233,7 +233,7 @@ int nvm_validate_responsibility(struct nvm_dev *dev)
 
 int nvm_init(struct nvm_dev *dev)
 {
-	struct nvm_bm_type *bt;
+	struct nvmm_type *mt;
 	int ret = 0;
 
 	if (!dev->q || !dev->ops)
@@ -277,19 +277,19 @@ int nvm_init(struct nvm_dev *dev)
 		goto err;
 	}
 
-	/* register with device with a supported BM */
-	list_for_each_entry(bt, &nvm_bms, list) {
-		ret = bt->register_bm(dev);
+	/* register with device with a supported manager */
+	list_for_each_entry(mt, &nvm_mgrs, list) {
+		ret = mt->register_mgr(dev);
 		if (ret < 0)
 			goto err; /* initialization failed */
 		if (ret > 0) {
-			dev->bm = bt;
+			dev->mt = mt;
 			break; /* successfully initialized */
 		}
 	}
 
 	if (!ret) {
-		pr_info("nvm: no compatible bm was found.\n");
+		pr_info("nvm: no compatible manager found.\n");
 		return 0;
 	}
 
@@ -387,27 +387,27 @@ static int nvm_create_target(struct nvm_dev *dev,
 {
 	struct nvm_ioctl_create_simple *s = &create->conf.s;
 	struct request_queue *tqueue;
-	struct nvm_bm_type *bt;
+	struct nvmm_type *mt;
 	struct gendisk *tdisk;
 	struct nvm_tgt_type *tt;
 	struct nvm_target *t;
 	void *targetdata;
 	int ret = 0;
 
-	if (!dev->bm) {
-		/* register with device with a supported BM */
-		list_for_each_entry(bt, &nvm_bms, list) {
-			ret = bt->register_bm(dev);
+	if (!dev->mt) {
+		/* register with device with a supported NVM manager */
+		list_for_each_entry(mt, &nvm_mgrs, list) {
+			ret = mt->register_mgr(dev);
 			if (ret < 0)
 				return ret; /* initialization failed */
 			if (ret > 0) {
-				dev->bm = bt;
+				dev->mt = mt;
 				break; /* successfully initialized */
 			}
 		}
 
 		if (!ret) {
-			pr_info("nvm: no compatible bm was found.\n");
+			pr_info("nvm: no compatible nvm manager found.\n");
 			return -ENODEV;
 		}
 	}
@@ -567,10 +567,10 @@ static int nvm_configure_show(const char *val)
 		return -EINVAL;
 	}
 
-	if (!dev->bm)
+	if (!dev->mt)
 		return 0;
 
-	dev->bm->free_blocks_print(dev);
+	dev->mt->free_blocks_print(dev);
 
 	return 0;
 }
@@ -734,11 +734,11 @@ static long nvm_ioctl_get_devices(struct file *file, void __user *arg)
 		struct nvm_ioctl_device_info *info = &devices->info[i];
 
 		sprintf(info->devname, "%s", dev->name);
-		if (dev->bm) {
-			info->bmversion[0] = dev->bm->version[0];
-			info->bmversion[1] = dev->bm->version[1];
-			info->bmversion[2] = dev->bm->version[2];
-			sprintf(info->bmname, "%s", dev->bm->name);
+		if (dev->mt) {
+			info->bmversion[0] = dev->mt->version[0];
+			info->bmversion[1] = dev->mt->version[1];
+			info->bmversion[2] = dev->mt->version[2];
+			sprintf(info->bmname, "%s", dev->mt->name);
 		} else {
 			sprintf(info->bmname, "none");
 		}

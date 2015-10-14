@@ -237,9 +237,9 @@ struct nvm_dev {
 	struct list_head devices;
 	struct list_head online_targets;
 
-	/* Block manager */
-	struct nvm_bm_type *bm;
-	void *bmp;
+	/* Media manager */
+	struct nvmm_type *mt;
+	void *mp;
 
 	/* Device information */
 	int nr_chnls;
@@ -433,57 +433,57 @@ extern void nvm_unregister_target(struct nvm_tgt_type *);
 extern void *nvm_dev_dma_alloc(struct nvm_dev *, gfp_t, dma_addr_t *);
 extern void nvm_dev_dma_free(struct nvm_dev *, void *, dma_addr_t);
 
-typedef int (nvm_bm_register_fn)(struct nvm_dev *);
-typedef void (nvm_bm_unregister_fn)(struct nvm_dev *);
-typedef struct nvm_block *(nvm_bm_get_blk_fn)(struct nvm_dev *,
+typedef int (nvmm_register_fn)(struct nvm_dev *);
+typedef void (nvmm_unregister_fn)(struct nvm_dev *);
+typedef struct nvm_block *(nvmm_get_blk_fn)(struct nvm_dev *,
 					      struct nvm_lun *, unsigned long);
-typedef void (nvm_bm_put_blk_fn)(struct nvm_dev *, struct nvm_block *);
-typedef int (nvm_bm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
-typedef int (nvm_bm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
-typedef void (nvm_bm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
-typedef int (nvm_bm_submit_io_fn)(struct nvm_dev *, struct nvm_rq *);
-typedef void (nvm_bm_end_io_fn)(struct nvm_rq *, int);
-typedef int (nvm_bm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *,
+typedef void (nvmm_put_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvmm_open_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvmm_close_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef void (nvmm_flush_blk_fn)(struct nvm_dev *, struct nvm_block *);
+typedef int (nvmm_submit_io_fn)(struct nvm_dev *, struct nvm_rq *);
+typedef void (nvmm_end_io_fn)(struct nvm_rq *, int);
+typedef int (nvmm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *,
 								unsigned long);
-typedef int (nvm_bm_register_prog_err_fn)(struct nvm_dev *,
+typedef int (nvmm_register_prog_err_fn)(struct nvm_dev *,
 	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
-typedef int (nvm_bm_save_state_fn)(struct file *);
-typedef int (nvm_bm_restore_state_fn)(struct file *);
-typedef struct nvm_lun *(nvm_bm_get_lun_fn)(struct nvm_dev *, int);
-typedef void (nvm_bm_free_blocks_print_fn)(struct nvm_dev *);
+typedef int (nvmm_save_state_fn)(struct file *);
+typedef int (nvmm_restore_state_fn)(struct file *);
+typedef struct nvm_lun *(nvmm_get_lun_fn)(struct nvm_dev *, int);
+typedef void (nvmm_free_blocks_print_fn)(struct nvm_dev *);
 
-struct nvm_bm_type {
+struct nvmm_type {
 	const char *name;
 	unsigned int version[3];
 
-	nvm_bm_register_fn *register_bm;
-	nvm_bm_unregister_fn *unregister_bm;
+	nvmm_register_fn *register_mgr;
+	nvmm_unregister_fn *unregister_mgr;
 
 	/* Block administration callbacks */
-	nvm_bm_get_blk_fn *get_blk;
-	nvm_bm_put_blk_fn *put_blk;
-	nvm_bm_open_blk_fn *open_blk;
-	nvm_bm_close_blk_fn *close_blk;
-	nvm_bm_flush_blk_fn *flush_blk;
+	nvmm_get_blk_fn *get_blk;
+	nvmm_put_blk_fn *put_blk;
+	nvmm_open_blk_fn *open_blk;
+	nvmm_close_blk_fn *close_blk;
+	nvmm_flush_blk_fn *flush_blk;
 
-	nvm_bm_submit_io_fn *submit_io;
-	nvm_bm_end_io_fn *end_io;
-	nvm_bm_erase_blk_fn *erase_blk;
+	nvmm_submit_io_fn *submit_io;
+	nvmm_end_io_fn *end_io;
+	nvmm_erase_blk_fn *erase_blk;
 
 	/* State management for debugging purposes */
-	nvm_bm_save_state_fn *save_state;
-	nvm_bm_restore_state_fn *restore_state;
+	nvmm_save_state_fn *save_state;
+	nvmm_restore_state_fn *restore_state;
 
 	/* Configuration management */
-	nvm_bm_get_lun_fn *get_lun;
+	nvmm_get_lun_fn *get_lun;
 
 	/* Statistics */
-	nvm_bm_free_blocks_print_fn *free_blocks_print;
+	nvmm_free_blocks_print_fn *free_blocks_print;
 	struct list_head list;
 };
 
-extern int nvm_register_bm(struct nvm_bm_type *);
-extern void nvm_unregister_bm(struct nvm_bm_type *);
+extern int nvm_register_mgr(struct nvmm_type *);
+extern void nvm_unregister_mgr(struct nvmm_type *);
 
 extern struct nvm_block *nvm_get_blk(struct nvm_dev *, struct nvm_lun *,
 								unsigned long);
