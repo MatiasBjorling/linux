@@ -172,5 +172,5 @@ int nvme_sg_get_version_num(int __user *ip);
 
 int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id);
 int nvme_nvm_register(struct request_queue *q, char *disk_name);
-void nvme_nvm_unregister(char *disk_name);
+void nvme_nvm_unregister(struct request_queue *q, char *disk_name);
 #endif /* _LINUX_NVME_H */

@@ -23,6 +23,7 @@
 #include <linux/nvme.h>
 #include <linux/bitops.h>
 #include <linux/lightnvm.h>
+#include <linux/vmalloc.h>
 
 #ifdef CONFIG_NVM
 
@@ -134,8 +135,11 @@ struct nvme_nvm_erase_blk {
 	__u64			rsvd[2];
 	__le64			prp1;
 	__le64			prp2;
-	__le64			blk_addr;
-	__u32			rsvd11[4];
+	__le64			spba;
+	__le16			length;
+	__le16			control;
+	__le32			dsmgmt;
+	__le64			resv;
 };
 
 struct nvme_nvm_command {
@@ -166,81 +170,69 @@ static inline void _nvme_nvm_check_size(void)
 	BUILD_BUG_ON(sizeof(struct nvme_nvm_erase_blk) != 64);
 }
 
-struct nvme_nvm_id_chnl {
+struct nvme_nvm_id_group {
 	__le64			laddr_begin;
-	__le64			laddr_end;
-	__le32			oob_size;
 	__le32			queue_size;
-	__le32			gran_read;
-	__le32			gran_write;
-	__le32			gran_erase;
+	__le32			channels;
+	__le32			luns_per_chnl;
+	__le32			sec_per_pg;
+	__le32			pgs_per_blk;
+	__le32			blks;
+	__le32			planes;
+	__le32			sec_size;
+	__le32			oob_size;
 	__le32			t_r;
 	__le32			t_sqr;
 	__le32			t_w;
 	__le32			t_sqw;
 	__le32			t_e;
 	__le16			chnl_parallelism;
-	__u8			io_sched;
-	__u8			reserved[133];
+	__u8			plane_mode;
+	__u8			addr_mode;
+	__u8			reserved[124];
 } __packed;
 
 struct nvme_nvm_id {
-	__u8			ver_id;
-	__u8			nvm_type;
-	__le16			nchannels;
-	__u8			reserved[252];
-	struct nvme_nvm_id_chnl	chnls[];
+	__le16			ver_id;
+	__le16			ngroups;
+	__le16			nvm_vendor;
+	__u8			reserved[250];
+	struct nvme_nvm_id_group groups[20];
 } __packed;
 
-#define NVME_NVM_CHNLS_PR_REQ ((4096U - sizeof(struct nvme_nvm_id)) \
-					/ sizeof(struct nvme_nvm_id_chnl))
 
 
-static int init_chnls(struct request_queue *q, struct nvm_id *nvm_id,
-						struct nvme_nvm_id *nvme_nvm_id)
+static int init_chnls(struct nvm_id *nvm_id, struct nvme_nvm_id *nvme_nvm_id)
 {
-	struct nvme_nvm_id_chnl *src = nvme_nvm_id->chnls;
-	struct nvm_id_chnl *dst = nvm_id->chnls;
-	struct nvme_ns *ns = q->queuedata;
-	struct nvme_nvm_command c = {};
-	unsigned int len = nvm_id->nchannels;
-	int i, end, ret, off = 0;
+	struct nvme_nvm_id_group *src;
+	struct nvm_id_group *dst;
+	int i, end;
 
-	c.identify.opcode = nvme_nvm_admin_identify;
-	c.identify.nsid = cpu_to_le32(ns->ns_id);
+	end = min_t(u32, 20, nvm_id->ngroups);
 
-	while (len) {
-		end = min_t(u32, NVME_NVM_CHNLS_PR_REQ, len);
+	for (i = 0; i < end; i++) {
+		src = &nvme_nvm_id->groups[i];
+		dst = &nvm_id->groups[i];
 
-		for (i = 0; i < end; i++, dst++, src++) {
-			dst->laddr_begin = le64_to_cpu(src->laddr_begin);
-			dst->laddr_end = le64_to_cpu(src->laddr_end);
-			dst->oob_size = le32_to_cpu(src->oob_size);
-			dst->queue_size = le32_to_cpu(src->queue_size);
-			dst->gran_read = le32_to_cpu(src->gran_read);
-			dst->gran_write = le32_to_cpu(src->gran_write);
-			dst->gran_erase = le32_to_cpu(src->gran_erase);
-			dst->t_r = le32_to_cpu(src->t_r);
-			dst->t_sqr = le32_to_cpu(src->t_sqr);
-			dst->t_w = le32_to_cpu(src->t_w);
-			dst->t_sqw = le32_to_cpu(src->t_sqw);
-			dst->t_e = le32_to_cpu(src->t_e);
-			dst->io_sched = src->io_sched;
-		}
-
-		len -= end;
-		if (!len)
-			break;
-
-		off += end;
-
-		c.identify.chnl_off = off;
-
-		ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c,
-							nvme_nvm_id, 4096);
-		if (ret)
-			return ret;
+		dst->laddr_begin = le64_to_cpu(src->laddr_begin);
+		dst->queue_size = le32_to_cpu(src->queue_size);
+		dst->channels = le32_to_cpu(src->channels);
+		dst->luns_per_chnl = le32_to_cpu(src->luns_per_chnl);
+		dst->sec_per_pg = le32_to_cpu(src->sec_per_pg);
+		dst->pgs_per_blk = le32_to_cpu(src->pgs_per_blk);
+		dst->blks = le32_to_cpu(src->blks);
+		dst->planes = le32_to_cpu(src->planes);
+		dst->sec_size = le32_to_cpu(src->sec_size);
+		dst->oob_size = le32_to_cpu(src->oob_size);
+		dst->t_r = le32_to_cpu(src->t_r);
+		dst->t_sqr = le32_to_cpu(src->t_sqr);
+		dst->t_w = le32_to_cpu(src->t_w);
+		dst->t_sqw = le32_to_cpu(src->t_sqw);
+		dst->t_e = le32_to_cpu(src->t_e);
+		dst->plane_mode = src->plane_mode;
+		dst->addr_mode = src->addr_mode;
 	}
+
 	return 0;
 }
 
@@ -254,37 +246,29 @@ static int nvme_nvm_identify(struct request_queue *q, struct nvm_id *nvm_id)
 	c.identify.opcode = nvme_nvm_admin_identify;
 	c.identify.nsid = cpu_to_le32(ns->ns_id);
 	c.identify.chnl_off = 0;
-	nvme_nvm_id = kmalloc(4096, GFP_KERNEL);
+	nvme_nvm_id = kmalloc(sizeof(struct nvme_nvm_id), GFP_KERNEL);
 	if (!nvme_nvm_id)
 		return -ENOMEM;
 
 	ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c, nvme_nvm_id,
-									4096);
+						sizeof(struct nvme_nvm_id));
 	if (ret) {
 		ret = -EIO;
 		goto out;
 	}
 
-	nvm_id->ver_id = nvme_nvm_id->ver_id;
-	nvm_id->nvm_type = nvme_nvm_id->nvm_type;
-	nvm_id->nchannels = le16_to_cpu(nvme_nvm_id->nchannels);
+	nvm_id->ver_id = le16_to_cpu(nvme_nvm_id->ver_id);
+	nvm_id->nvm_vendor = le16_to_cpu(nvme_nvm_id->nvm_vendor);
+	nvm_id->ngroups = le16_to_cpu(nvme_nvm_id->ngroups);
 
-	if (!nvm_id->chnls)
-		nvm_id->chnls = kmalloc(sizeof(struct nvm_id_chnl)
-					* nvm_id->nchannels, GFP_KERNEL);
-	if (!nvm_id->chnls) {
-		ret = -ENOMEM;
-		goto out;
-	}
-
-	ret = init_chnls(q, nvm_id, nvme_nvm_id);
+	ret = init_chnls(nvm_id, nvme_nvm_id);
 out:
 	kfree(nvme_nvm_id);
 	return ret;
 }
 
 static int nvme_nvm_get_features(struct request_queue *q,
-						struct nvm_get_features *gf)
+                                 struct nvm_get_features *gf)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_nvm_command c = {};
@@ -368,14 +352,8 @@ out:
 	return ret;
 }
 
-static int nvme_nvm_set_bb_tbl(struct request_queue *q, int lunid,
-	unsigned int nr_blocks, nvm_bb_update_fn *update_bbtbl, void *priv)
-{
-	return 0;
-}
-
 static int nvme_nvm_get_bb_tbl(struct request_queue *q, int lunid,
-	unsigned int nr_blocks, nvm_bb_update_fn *update_bbtbl, void *priv)
+                               unsigned int nr_blocks, nvm_bb_update_fn *update_bbtbl, void *priv)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_dev *dev = ns->dev;
@@ -395,7 +373,7 @@ static int nvme_nvm_get_bb_tbl(struct request_queue *q, int lunid,
 	bitmap_zero(bb_bitmap, nr_blocks);
 
 	ret = nvme_submit_sync_cmd(q, (struct nvme_command *)&c, bb_bitmap,
-								bb_bitmap_size);
+	                           bb_bitmap_size);
 	if (ret) {
 		dev_err(dev->dev, "get bad block table failed (%d)\n", ret);
 		ret = -EIO;
@@ -419,11 +397,11 @@ static inline void nvme_nvm_cmd_hybrid(struct nvm_rq *rqd, struct nvme_ns *ns,
 	c->hb_rw.opcode = (rqd->opcode & 1) ?
 				nvme_nvm_cmd_hb_write : nvme_nvm_cmd_hb_read;
 	c->hb_rw.nsid = cpu_to_le32(ns->ns_id);
-	if (rqd->npages == 1)
-		c->hb_rw.spba = cpu_to_le64(nvme_block_nr(ns, rqd->ppa));
+	if (rqd->nr_pages == 1)
+		c->hb_rw.spba = cpu_to_le64(rqd->ppa_addr.ppa);
 	else
 		c->hb_rw.spba = cpu_to_le64(rqd->dma_ppa_list);
-	c->hb_rw.length = cpu_to_le16(rqd->npages - 1);
+	c->hb_rw.length = cpu_to_le16(rqd->nr_pages - 1);
 	c->hb_rw.slba = cpu_to_le64(nvme_block_nr(ns,
 						rqd->bio->bi_iter.bi_sector));
 }
@@ -434,11 +412,12 @@ static inline void nvme_nvm_cmd_phys(struct nvm_rq *rqd, struct nvme_ns *ns,
 	c->ph_rw.opcode = (rqd->opcode & 1) ?
 				nvme_nvm_cmd_ph_write : nvme_nvm_cmd_ph_read;
 	c->ph_rw.nsid = cpu_to_le32(ns->ns_id);
-	if (rqd->npages == 1)
-		c->ph_rw.spba = cpu_to_le64(nvme_block_nr(ns, rqd->ppa));
+	if (rqd->nr_pages == 1)
+		c->ph_rw.spba = cpu_to_le64(rqd->ppa_addr.ppa);
 	else
 		c->ph_rw.spba = cpu_to_le64(rqd->dma_ppa_list);
-	c->ph_rw.length = cpu_to_le16(rqd->npages - 1);
+	c->ph_rw.length = cpu_to_le16(rqd->nr_pages - 1);
+	c->ph_rw.control = cpu_to_le16(0x2); /*quad access*/
 }
 
 static inline void nvme_nvm_rqtocmd(struct request *rq, struct nvm_rq *rqd,
@@ -454,16 +433,20 @@ static inline void nvme_nvm_rqtocmd(struct request *rq, struct nvm_rq *rqd,
 		nvme_nvm_cmd_phys(rqd, ns, c);
 		break;
 	default:
-		pr_err("nvm: invalid opcode\n");
+		pr_err("nvme: invalid opcode\n");
 	}
 }
 
 static void nvme_nvm_end_io(struct request *rq, int error)
 {
 	struct nvm_rq *rqd = rq->end_io_data;
-	struct nvm_tgt_instance *ins = rqd->ins;
+	struct nvm_dev *dev = rqd->dev;
 
-	ins->tt->end_io(rqd, error);
+	if (error)
+		pr_err("nvme: err status: %x result: %lx\n",
+				rq->errors, (unsigned long)rq->special);
+
+	dev->bm->end_io(rqd, error);
 
 	kfree(rq->cmd);
 	blk_mq_free_request(rq);
@@ -508,14 +491,19 @@ static int nvme_nvm_submit_io(struct request_queue *q, struct nvm_rq *rqd)
 	return 0;
 }
 
-static int nvme_nvm_erase_block(struct request_queue *q, sector_t block_id)
+static int nvme_nvm_erase_block(struct request_queue *q, struct nvm_rq *rqd)
 {
 	struct nvme_ns *ns = q->queuedata;
 	struct nvme_nvm_command c = {};
 
 	c.erase.opcode = nvme_nvm_cmd_erase;
 	c.erase.nsid = cpu_to_le32(ns->ns_id);
-	c.erase.blk_addr = cpu_to_le64(block_id);
+	if (rqd->nr_pages == 1)
+		c.erase.spba = cpu_to_le64(rqd->ppa_addr.ppa);
+	else
+		c.erase.spba = cpu_to_le64(rqd->dma_ppa_list);
+	c.erase.length = cpu_to_le16(rqd->nr_pages - 1);
+
 	return nvme_submit_sync_cmd(q, (struct nvme_command *)&c, NULL, 0);
 }
 
@@ -554,7 +542,6 @@ static struct nvm_dev_ops nvme_nvm_dev_ops = {
 
 	.get_l2p_tbl		= nvme_nvm_get_l2p_tbl,
 
-	.set_bb_tbl		= nvme_nvm_set_bb_tbl,
 	.get_bb_tbl		= nvme_nvm_get_bb_tbl,
 
 	.submit_io		= nvme_nvm_submit_io,
@@ -573,7 +560,7 @@ int nvme_nvm_register(struct request_queue *q, char *disk_name)
 	return nvm_register(q, disk_name, &nvme_nvm_dev_ops);
 }
 
-void nvme_nvm_unregister(char *disk_name)
+void nvme_nvm_unregister(struct request_queue *q, char *disk_name)
 {
 	nvm_unregister(disk_name);
 }

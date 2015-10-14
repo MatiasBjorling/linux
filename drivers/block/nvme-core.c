@@ -2259,7 +2259,7 @@ static void nvme_free_namespace(struct nvme_ns *ns)
 	list_del(&ns->list);
 
 	if (ns->type == NVME_NS_LIGHTNVM)
-		nvme_nvm_unregister(ns->disk->disk_name);
+		nvme_nvm_unregister(ns->queue, ns->disk->disk_name);
 
 	spin_lock(&dev_list_lock);
 	ns->disk->private_data = NULL;
