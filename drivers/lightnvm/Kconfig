@@ -25,12 +25,12 @@ config NVM_DEBUG
 
 	It is required to create/remove targets without IOCTLs.
 
-config NVM_BM_HB
-	tristate "Block manager for Hybrid Open-Channel SSD"
+config NVM_GENNVM
+	tristate "Generic NVM manager for Open-Channel SSDs"
 	---help---
-	Block manager for SSDs that offload block management off to the device,
-	while keeping data placement and garbage collection decisions on the
-	host.
+	NVM media manager for Open-Channel SSDs that offload management
+	functionality to device, while keeping data placement and garbage
+	collection decisions on the host.
 
 config NVM_RRPC
 	tristate "Round-robin Hybrid Open-Channel SSD target"
