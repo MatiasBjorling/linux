@@ -1042,7 +1042,7 @@ static int rrpc_luns_init(struct rrpc *rrpc, int lun_begin, int lun_end)
 
 	/* 1:1 mapping */
 	for (i = 0; i < rrpc->nr_luns; i++) {
-		struct nvm_lun *lun = dev->bm->get_lun(dev, lun_begin + i);;
+		struct nvm_lun *lun = dev->mt->get_lun(dev, lun_begin + i);;
 
 		if (dev->pgs_per_blk >
 				MAX_INVALID_PAGES_STORAGE * BITS_PER_LONG) {
