@@ -1,5 +1,5 @@
 /*
- * Copyright: Matias Bjorling <mb@lightnvm.io>
+ * Copyright: Matias Bjorling <mb@bjorling.me>
  *
  * This program is free software; you can redistribute it and/or
  * modify it under the terms of the GNU General Public License version
@@ -12,15 +12,15 @@
  *
  */
 
-#ifndef BM_HB_H_
-#define BM_HB_H_
+#ifndef GENNVM_H_
+#define GENNVM_H_
 
 #include <linux/module.h>
 #include <linux/vmalloc.h>
 
 #include <linux/lightnvm.h>
 
-struct bm_lun {
+struct gen_lun {
 	struct nvm_lun vlun;
 
 	int reserved_blocks;
@@ -32,13 +32,13 @@ struct bm_lun {
 					   free_list and used_list */
 };
 
-struct bm_hb {
+struct gen_nvm {
 	int nr_luns;
-	struct bm_lun *luns;
+	struct gen_lun *luns;
 };
 
-#define bm_for_each_lun(bm, lun, i) \
+#define gennvm_for_each_lun(bm, lun, i) \
 		for ((i) = 0, lun = &(bm)->luns[0]; \
 			(i) < (bm)->nr_luns; (i)++, lun = &(bm)->luns[(i)])
 
-#endif /* BM_HB_H_ */
+#endif /* GENNVM_H_ */
