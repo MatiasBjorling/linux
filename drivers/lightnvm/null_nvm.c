@@ -112,10 +112,6 @@ static bool use_per_node_hctx;
 module_param(use_per_node_hctx, bool, S_IRUGO);
 MODULE_PARM_DESC(use_per_node_hctx, "Use per-node allocation for hardware context queues. Default: false");
 
-static int num_channels = 1;
-module_param(num_channels, int, S_IRUGO);
-MODULE_PARM_DESC(num_channels, "Number of channels to be exposed. Default: 1");
-
 static enum hrtimer_restart null_cmd_timer_expired(struct hrtimer *timer)
 {
 	struct completion_queue *cq;
@@ -183,8 +179,6 @@ static inline void null_handle_cmd(struct nulln_cmd *cmd)
 static int null_id(struct request_queue *q, struct nvm_id *id)
 {
 	sector_t size = gb * 1024 * 1024 * 1024ULL;
-	unsigned long per_chnl_size =
-				size / bs / num_channels;
 	struct nvm_id_group *grp;
 
 	id->ver_id = 0x1;
@@ -194,13 +188,14 @@ static int null_id(struct request_queue *q, struct nvm_id *id)
 	id->dom = 0x1;
 	id->ppat = NVM_ADDRMODE_LINEAR;
 
+	do_div(size, bs); /* convert size to pages */
 	grp = &id->groups[0];
 	grp->mtype = 0;
 	grp->fmtype = 1;
 	grp->num_ch = 1;
-	grp->num_lun = num_channels;
+	grp->num_lun = 1;
 	grp->num_pln = 1;
-	grp->num_blk = per_chnl_size / 256;
+	grp->num_blk = size / 256;
 	grp->num_pg = 256;
 	grp->fpg_sz = bs;
 	grp->csecs = bs;
