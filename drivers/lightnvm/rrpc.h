@@ -93,7 +93,7 @@ struct rrpc {
 	struct rrpc_lun *luns;
 
 	/* calculated values */
-	unsigned long nr_pages;
+	unsigned long long nr_pages;
 	unsigned long total_blocks;
 
 	/* Write strategy variables. Move these into each for structure for each

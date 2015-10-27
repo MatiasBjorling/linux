@@ -38,7 +38,7 @@ static void rrpc_page_invalidate(struct rrpc *rrpc, struct rrpc_addr *a)
 
 	spin_lock(&rblk->lock);
 
-	pg_offset = a->addr % rrpc->dev->pgs_per_blk;
+	div_u64_rem(a->addr, rrpc->dev->pgs_per_blk, &pg_offset);
 	WARN_ON(test_and_set_bit(pg_offset, rblk->invalid_pages));
 	rblk->nr_invalid_pages++;
 
@@ -331,7 +331,7 @@ static void rrpc_block_gc(struct work_struct *work)
 	struct rrpc_block *rblk = gcb->rblk;
 	struct nvm_dev *dev = rrpc->dev;
 
-	pr_debug("nvm: block '%llu' being reclaimed\n", rblk->parent->id);
+	pr_debug("nvm: block '%lu' being reclaimed\n", rblk->parent->id);
 
 	if (rrpc_move_valid_pages(rrpc, rblk))
 		goto done;
@@ -397,7 +397,7 @@ static void rrpc_lun_gc(struct work_struct *work)
 
 		BUG_ON(!block_is_full(rrpc, rblock));
 
-		pr_debug("rrpc: selected block '%llu' for GC\n", block->id);
+		pr_debug("rrpc: selected block '%lu' for GC\n", block->id);
 
 		gcb = mempool_alloc(rrpc->gcb_pool, GFP_ATOMIC);
 		if (!gcb)
@@ -430,7 +430,7 @@ static void rrpc_gc_queue(struct work_struct *work)
 	spin_unlock(&rlun->lock);
 
 	mempool_free(gcb, rrpc->gcb_pool);
-	pr_debug("nvm: block '%llu' is full, allow GC (sched)\n",
+	pr_debug("nvm: block '%lu' is full, allow GC (sched)\n",
 							rblk->parent->id);
 }
 
@@ -1113,17 +1113,19 @@ static sector_t rrpc_capacity(void *private)
 {
 	struct rrpc *rrpc = private;
 	struct nvm_dev *dev = rrpc->dev;
-	sector_t reserved;
+	sector_t reserved, provisioned;
 
 	/* cur, gc, and two emergency blocks for each lun */
 	reserved = rrpc->nr_luns * dev->max_pages_per_blk * 4;
+	provisioned = rrpc->nr_pages - reserved;
 
 	if (reserved > rrpc->nr_pages) {
 		pr_err("rrpc: not enough space available to expose storage.\n");
 		return 0;
 	}
 
-	return ((rrpc->nr_pages - reserved) / 10) * 9 * NR_PHY_IN_LOG;
+	sector_div(provisioned, 10);
+	return provisioned * 9 * NR_PHY_IN_LOG;
 }
 
 /*
