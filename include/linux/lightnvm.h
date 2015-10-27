@@ -245,7 +245,7 @@ struct nvm_lun {
 struct nvm_block {
 	struct list_head list;
 	struct nvm_lun *lun;
-	unsigned long long id;
+	unsigned long id;
 
 	void *priv;
 	int type;
@@ -322,20 +322,28 @@ static struct ppa_addr __linear_to_generic_addr(struct nvm_dev *dev,
 							struct ppa_addr r)
 {
 	struct ppa_addr l;
+	int secs, pgs, blks, luns;
+	sector_t ppa = r.ppa;
 
 	l.ppa = 0;
 
-	l.g.sec = r.ppa % dev->sec_per_pg;
-	l.g.pg = (r.ppa / dev->sec_per_pg) % dev->pgs_per_blk;
-	l.g.blk = (r.ppa / (dev->pgs_per_blk *
-				dev->sec_per_pg)) % dev->blks_per_lun;
-	l.g.lun = (r.ppa / (dev->blks_per_lun *
-				dev->pgs_per_blk *
-				dev->sec_per_pg)) % dev->luns_per_chnl;
-	l.g.ch = r.ppa / (dev->blks_per_lun *
-				dev->pgs_per_blk *
-				dev->luns_per_chnl *
-				dev->sec_per_pg);
+	div_u64_rem(ppa, dev->sec_per_pg, &secs);
+	l.g.sec = secs;
+
+	sector_div(ppa, dev->sec_per_pg);
+	div_u64_rem(ppa, dev->sec_per_blk, &pgs);
+	l.g.pg = pgs;
+
+	sector_div(ppa, dev->pgs_per_blk);
+	div_u64_rem(ppa, dev->blks_per_lun, &blks);
+	l.g.blk = blks;
+
+	sector_div(ppa, dev->blks_per_lun);
+	div_u64_rem(ppa, dev->luns_per_chnl, &luns);
+	l.g.lun = luns;
+
+	sector_div(ppa, dev->luns_per_chnl);
+	l.g.ch = ppa;
 
 	return l;
 }

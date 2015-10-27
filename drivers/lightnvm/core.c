@@ -654,11 +654,8 @@ static long nvm_ioctl_info(struct file *file, void __user *arg)
 	if (!capable(CAP_SYS_ADMIN))
 		return -EPERM;
 
-	info = kzalloc(sizeof(struct nvm_ioctl_info), GFP_KERNEL);
-	if (!info)
-		return -ENOMEM;
-
-	if (copy_from_user(info, arg, sizeof(struct nvm_ioctl_info)))
+	info = memdup_user(arg, sizeof(struct nvm_ioctl_info));
+	if (IS_ERR(info))
 		return -EFAULT;
 
 	info->version[0] = NVM_VERSION_MAJOR;
