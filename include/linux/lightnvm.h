@@ -117,16 +117,11 @@ struct nvm_tgt_instance {
 	struct nvm_tgt_type *tt;
 };
 
-/* The minimum managed sector size is currently 4K. */
-#define DEV_EXPOSED_PAGE_SIZE (4096)
-
-#define NVM_MSG_PREFIX "nvm"
 #define ADDR_EMPTY (~0ULL)
 
 #define NVM_VERSION_MAJOR 1
 #define NVM_VERSION_MINOR 0
 #define NVM_VERSION_PATCH 0
-
 
 #define NVM_SEC_BITS (8)
 #define NVM_PL_BITS  (6)
@@ -208,7 +203,7 @@ typedef int (nvm_erase_blk_fn)(struct request_queue *, struct nvm_rq *);
 typedef void *(nvm_create_dma_pool_fn)(struct request_queue *, char *);
 typedef void (nvm_destroy_dma_pool_fn)(void *);
 typedef void *(nvm_dev_dma_alloc_fn)(struct request_queue *, void *, gfp_t,
-								dma_addr_t*);
+								dma_addr_t *);
 typedef void (nvm_dev_dma_free_fn)(void *, void*, dma_addr_t);
 
 struct nvm_dev_ops {
@@ -225,7 +220,6 @@ struct nvm_dev_ops {
 	nvm_dev_dma_alloc_fn	*dev_dma_alloc;
 	nvm_dev_dma_free_fn	*dev_dma_free;
 
-	int			dev_sector_size;
 	uint8_t			max_phys_sect;
 };
 
@@ -236,7 +230,6 @@ struct nvm_lun {
 	int chnl_id;
 
 	unsigned int nr_free_blocks;	/* Number of unused blocks */
-
 	struct nvm_block *blocks;
 
 	spinlock_t lock;
@@ -271,12 +264,12 @@ struct nvm_dev {
 	int sec_size;
 	int oob_size;
 	int addr_mode;
-	int plane_mode;
 	struct nvm_addr_format addr_format;
 
 	/* Calculated/Cached values. These do not reflect the actual usable
 	 * blocks at run-time.
 	 */
+	int plane_mode; /* drive device in single, double or quad mode */
 
 	int sec_per_pl; /* all sectors across planes */
 	int sec_per_blk;
@@ -473,10 +466,6 @@ typedef int (nvmm_submit_io_fn)(struct nvm_dev *, struct nvm_rq *);
 typedef int (nvmm_end_io_fn)(struct nvm_rq *, int);
 typedef int (nvmm_erase_blk_fn)(struct nvm_dev *, struct nvm_block *,
 								unsigned long);
-typedef int (nvmm_register_prog_err_fn)(struct nvm_dev *,
-	     void (prog_err_fn)(struct nvm_dev *, struct nvm_block *));
-typedef int (nvmm_save_state_fn)(struct file *);
-typedef int (nvmm_restore_state_fn)(struct file *);
 typedef struct nvm_lun *(nvmm_get_lun_fn)(struct nvm_dev *, int);
 typedef void (nvmm_free_blocks_print_fn)(struct nvm_dev *);
 
@@ -497,10 +486,6 @@ struct nvmm_type {
 	nvmm_submit_io_fn *submit_io;
 	nvmm_end_io_fn *end_io;
 	nvmm_erase_blk_fn *erase_blk;
-
-	/* State management for debugging purposes */
-	nvmm_save_state_fn *save_state;
-	nvmm_restore_state_fn *restore_state;
 
 	/* Configuration management */
 	nvmm_get_lun_fn *get_lun;
@@ -523,14 +508,7 @@ extern void nvm_unregister(char *);
 
 extern int nvm_submit_io(struct nvm_dev *, struct nvm_rq *);
 extern int nvm_erase_blk(struct nvm_dev *, struct nvm_block *);
-
-static inline unsigned long nvm_get_rq_flags(struct request *rq)
-{
-	return (unsigned long)rq->cmd;
-}
-
 #else /* CONFIG_NVM */
-
 struct nvm_dev_ops;
 
 static inline int nvm_register(struct request_queue *q, char *disk_name,
@@ -539,6 +517,5 @@ static inline int nvm_register(struct request_queue *q, char *disk_name,
 	return -EINVAL;
 }
 static inline void nvm_unregister(char *disk_name) {}
-
 #endif /* CONFIG_NVM */
 #endif /* LIGHTNVM.H */

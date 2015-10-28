@@ -154,7 +154,6 @@ int nvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
 }
 EXPORT_SYMBOL(nvm_submit_io);
 
-/* Send erase command to device */
 int nvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk)
 {
 	return dev->mt->erase_blk(dev, blk, 0);
@@ -301,7 +300,6 @@ int nvm_register(struct request_queue *q, char *disk_name,
 
 	dev->q = q;
 	dev->ops = ops;
-	dev->ops->dev_sector_size = DEV_EXPOSED_PAGE_SIZE;
 	strncpy(dev->name, disk_name, DISK_NAME_LEN);
 
 	ret = nvm_init(dev);
@@ -320,7 +318,7 @@ int nvm_register(struct request_queue *q, char *disk_name,
 			return -ENOMEM;
 		}
 	} else if (dev->ops->max_phys_sect > 256) {
-		pr_info("nvm: max sectors supported by device are 256.\n");
+		pr_info("nvm: max sectors supported is 256.\n");
 		return -EINVAL;
 	}
 
@@ -336,7 +334,7 @@ void nvm_unregister(char *disk_name)
 	struct nvm_dev *dev = nvm_find_nvm_dev(disk_name);
 
 	if (!dev) {
-		pr_err("nvm: could not find device %s on unregister\n",
+		pr_err("nvm: could not find device %s to unregister\n",
 								disk_name);
 		return;
 	}
@@ -595,7 +593,7 @@ static int nvm_configure_by_str_event(const char *val,
 
 	ret = sscanf(val, "%c", &opcode);
 	if (ret != 1) {
-		pr_err("nvm: configure must be in the format of \"opcode ...\"\n");
+		pr_err("nvm: string must have the format of \"cmd ...\"\n");
 		return -EINVAL;
 	}
 
@@ -607,7 +605,7 @@ static int nvm_configure_by_str_event(const char *val,
 	case 's':
 		return nvm_configure_show(val);
 	default:
-		pr_err("nvm: invalid opcode.\n");
+		pr_err("nvm: invalid command\n");
 		return -EINVAL;
 	}
 
