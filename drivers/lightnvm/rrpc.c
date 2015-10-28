@@ -791,7 +791,7 @@ static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 
 	err = nvm_submit_io(rrpc->dev, rqd);
 	if (err) {
-		pr_err("rrpc: IO submission failed: %d\n", err);
+		pr_err("rrpc: I/O submission failed: %d\n", err);
 		return NVM_IO_ERR;
 	}
 
@@ -1237,7 +1237,7 @@ static void *rrpc_init(struct nvm_dev *dev, struct gendisk *tdisk,
 
 	ret = rrpc_luns_init(rrpc, lun_begin, lun_end);
 	if (ret) {
-		pr_err("nvm: could not initialize luns\n");
+		pr_err("nvm: rrpc: could not initialize luns\n");
 		goto err;
 	}
 
@@ -1315,4 +1315,4 @@ static void rrpc_module_exit(void)
 module_init(rrpc_module_init);
 module_exit(rrpc_module_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Hybrid Target for Open-Channel SSDs");
+MODULE_DESCRIPTION("Block-Device Target for Open-Channel SSDs");
