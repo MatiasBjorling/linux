@@ -69,21 +69,21 @@ static int gennvm_block_bb(u32 lun_id, void *bb_bitmap, unsigned int nr_blocks,
 {
 	struct gen_nvm *gn = private;
 	struct gen_lun *lun = &gn->luns[lun_id];
-	struct nvm_block *block;
+	struct nvm_block *blk;
 	int i;
 
 	if (unlikely(bitmap_empty(bb_bitmap, nr_blocks)))
 		return 0;
 
 	i = -1;
-	while ((i = find_next_bit(bb_bitmap, nr_blocks, i + 1)) <
-			nr_blocks) {
-		block = &lun->vlun.blocks[i];
-		if (!block) {
-			pr_err("gen_nvm: BB data is out of bounds.\n");
+	while ((i = find_next_bit(bb_bitmap, nr_blocks, i + 1)) < nr_blocks) {
+		blk = &lun->vlun.blocks[i];
+		if (!blk) {
+			pr_err("gennvm: BB data is out of bounds.\n");
 			return -EINVAL;
 		}
-		list_move_tail(&block->list, &lun->bb_list);
+
+		list_move_tail(&blk->list, &lun->bb_list);
 	}
 
 	return 0;
@@ -101,7 +101,7 @@ static int gennvm_block_map(u64 slba, u32 nlb, __le64 *entries, void *private)
 	int lun_id;
 
 	if (unlikely(elba > dev->total_pages)) {
-		pr_err("gen_nvm: L2P data from device is out of bounds!\n");
+		pr_err("gennvm: L2P data from device is out of bounds!\n");
 		return -EINVAL;
 	}
 
@@ -109,7 +109,7 @@ static int gennvm_block_map(u64 slba, u32 nlb, __le64 *entries, void *private)
 		u64 pba = le64_to_cpu(entries[i]);
 
 		if (unlikely(pba >= max_pages && pba != U64_MAX)) {
-			pr_err("gen_nvm: L2P data entry is out of bounds!\n");
+			pr_err("gennvm: L2P data entry is out of bounds!\n");
 			return -EINVAL;
 		}
 
@@ -174,7 +174,7 @@ static int gennvm_blocks_init(struct nvm_dev *dev, struct gen_nvm *gn)
 			ret = dev->ops->get_bb_tbl(dev->q, lun->vlun.id,
 					dev->blks_per_lun, gennvm_block_bb, gn);
 			if (ret)
-				pr_err("gen_nvm: could not read BB table\n");
+				pr_err("gennvm: could not read BB table\n");
 		}
 	}
 
@@ -182,8 +182,8 @@ static int gennvm_blocks_init(struct nvm_dev *dev, struct gen_nvm *gn)
 		ret = dev->ops->get_l2p_tbl(dev->q, 0, dev->total_pages,
 							gennvm_block_map, dev);
 		if (ret) {
-			pr_err("gen_nvm: could not read L2P table.\n");
-			pr_warn("gen_nvm: default block initialization");
+			pr_err("gennvm: could not read L2P table.\n");
+			pr_warn("gennvm: default block initialization");
 		}
 	}
 
@@ -204,13 +204,13 @@ static int gennvm_register(struct nvm_dev *dev)
 
 	ret = gennvm_luns_init(dev, gn);
 	if (ret) {
-		pr_err("gen_nvm: could not initialize luns\n");
+		pr_err("gennvm: could not initialize luns\n");
 		goto err;
 	}
 
 	ret = gennvm_blocks_init(dev, gn);
 	if (ret) {
-		pr_err("gen_nvm: could not initialize blocks\n");
+		pr_err("gennvm: could not initialize blocks\n");
 		goto err;
 	}
 
@@ -235,12 +235,10 @@ static struct nvm_block *gennvm_get_blk(struct nvm_dev *dev,
 	struct nvm_block *blk = NULL;
 	int is_gc = flags & NVM_IOTYPE_GC;
 
-	BUG_ON(!lun);
-
 	spin_lock(&vlun->lock);
 
 	if (list_empty(&lun->free_list)) {
-		pr_err_ratelimited("gen_nvm: lun %u have no free pages available",
+		pr_err_ratelimited("gennvm: lun %u have no free pages available",
 								lun->vlun.id);
 		spin_unlock(&vlun->lock);
 		goto out;
@@ -279,7 +277,10 @@ static void gennvm_put_blk(struct nvm_dev *dev, struct nvm_block *blk)
 		list_move_tail(&blk->list, &lun->bb_list);
 		break;
 	default:
-		BUG();
+		WARN_ON_ONCE(1);
+		pr_err("gennvm: erroneous block type (%lu -> %u)\n",
+							blk->id, blk->type);
+		list_move_tail(&blk->list, &lun->bb_list);
 	}
 
 	spin_unlock(&vlun->lock);
@@ -289,24 +290,26 @@ static void gennvm_addr_to_generic_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	int i;
 
-	if (rqd->nr_pages > 1)
+	if (rqd->nr_pages > 1) {
 		for (i = 0; i < rqd->nr_pages; i++)
 			rqd->ppa_list[i] = addr_to_generic_mode(dev,
 							rqd->ppa_list[i]);
-	else
+	} else {
 		rqd->ppa_addr = addr_to_generic_mode(dev, rqd->ppa_addr);
+	}
 }
 
 static void gennvm_generic_to_addr_mode(struct nvm_dev *dev, struct nvm_rq *rqd)
 {
 	int i;
 
-	if (rqd->nr_pages > 1)
+	if (rqd->nr_pages > 1) {
 		for (i = 0; i < rqd->nr_pages; i++)
 			rqd->ppa_list[i] = generic_to_addr_mode(dev,
 							rqd->ppa_list[i]);
-	else
+	} else {
 		rqd->ppa_addr = generic_to_addr_mode(dev, rqd->ppa_addr);
+	}
 }
 
 static int gennvm_submit_io(struct nvm_dev *dev, struct nvm_rq *rqd)
@@ -328,9 +331,16 @@ static void gennvm_blk_set_type(struct nvm_dev *dev, struct ppa_addr *ppa,
 	struct gen_lun *lun;
 	struct nvm_block *blk;
 
-	BUG_ON(ppa->g.ch > dev->nr_chnls);
-	BUG_ON(ppa->g.lun > dev->luns_per_chnl);
-	BUG_ON(ppa->g.blk > dev->blks_per_lun);
+	if (unlikely(ppa->g.ch > dev->nr_chnls ||
+					ppa->g.lun > dev->luns_per_chnl ||
+					ppa->g.blk > dev->blks_per_lun)) {
+		WARN_ON_ONCE(1);
+		pr_err("gennvm: ppa broken (ch: %u > %u lun: %u > %u blk: %u > %u",
+				ppa->g.ch, dev->nr_chnls,
+				ppa->g.lun, dev->luns_per_chnl,
+				ppa->g.blk, dev->blks_per_lun);
+		return;
+	}
 
 	lun = &gn->luns[ppa->g.lun * ppa->g.ch];
 	blk = &lun->vlun.blocks[ppa->g.blk];
@@ -403,7 +413,7 @@ static int gennvm_erase_blk(struct nvm_dev *dev, struct nvm_block *blk,
 		rqd.ppa_list = nvm_dev_dma_alloc(dev, GFP_KERNEL,
 							&rqd.dma_ppa_list);
 		if (!rqd.ppa_list) {
-			pr_err("gen_nvm: failed to allocate dma memory\n");
+			pr_err("gennvm: failed to allocate dma memory\n");
 			return -ENOMEM;
 		}
 
@@ -472,4 +482,4 @@ static void gennvm_module_exit(void)
 module_init(gennvm_module_init);
 module_exit(gennvm_module_exit);
 MODULE_LICENSE("GPL v2");
-MODULE_DESCRIPTION("Block manager for Hybrid Open-Channel SSDs");
+MODULE_DESCRIPTION("Generic media manager for Open-Channel SSDs");
