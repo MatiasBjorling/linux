@@ -251,6 +251,7 @@ static int nvme_nvm_identity(struct request_queue *q, struct nvm_id *nvm_id)
 	c.identity.opcode = nvme_nvm_admin_identity;
 	c.identity.nsid = cpu_to_le32(ns->ns_id);
 	c.identity.chnl_off = 0;
+
 	nvme_nvm_id = kmalloc(sizeof(struct nvme_nvm_id), GFP_KERNEL);
 	if (!nvme_nvm_id)
 		return -ENOMEM;
@@ -500,13 +501,14 @@ int nvme_nvm_ns_supported(struct nvme_ns *ns, struct nvme_id_ns *id)
 	struct nvme_dev *dev = ns->dev;
 	struct pci_dev *pdev = to_pci_dev(dev->dev);
 
-	/* QEMU NVMe simulator - LightNVM detection*/
+	/* QEMU NVMe simulator - PCI ID + Vendor specific bit */
 	if (pdev->vendor == PCI_VENDOR_ID_INTEL && pdev->device == 0x5845 &&
 							id->vs[0] == 0x1)
 		return 1;
 
-	/* CNEX Labs */
-	if (pdev->vendor == 0x1d1d && pdev->device == 0x2807)
+	/* CNEX Labs - PCI ID + Vendor specific bit */
+	if (pdev->vendor == 0x1d1d && pdev->device == 0x2807 &&
+							id->vs[0] == 0x1)
 		return 1;
 
 	return 0;
