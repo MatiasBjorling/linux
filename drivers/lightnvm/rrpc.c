@@ -778,6 +778,12 @@ static int rrpc_submit_io(struct rrpc *rrpc, struct bio *bio,
 	int err;
 	struct rrpc_rq *rrq = nvm_rq_to_pdu(rqd);
 	uint8_t nr_pages = rrpc_get_pages(bio);
+	int bio_size = bio_sectors(bio) << 9;
+
+	if (bio_size < rrpc->dev->sec_size)
+		return NVM_IO_ERR;
+	else if (bio_size > rrpc->dev->max_rq_size)
+		return NVM_IO_ERR;
 
 	err = rrpc_setup_rq(rrpc, bio, rqd, flags, nr_pages);
 	if (err)
