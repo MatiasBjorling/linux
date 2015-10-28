@@ -269,6 +269,7 @@ struct nvm_dev {
 	/* Calculated/Cached values. These do not reflect the actual usable
 	 * blocks at run-time.
 	 */
+	int max_rq_size;
 	int plane_mode; /* drive device in single, double or quad mode */
 
 	int sec_per_pl; /* all sectors across planes */

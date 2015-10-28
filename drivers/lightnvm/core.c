@@ -183,6 +183,8 @@ static int nvm_core_init(struct nvm_dev *dev)
 	dev->addr_format = id->ppaf;
 
 	dev->plane_mode = NVM_PLANE_SINGLE;
+	dev->max_rq_size = dev->ops->max_phys_sect * dev->sec_size;
+
 	if (grp->mpos & 0x020202)
 		dev->plane_mode = NVM_PLANE_DOUBLE;
 	if (grp->mpos & 0x040404)
